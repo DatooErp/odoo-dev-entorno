@@ -49,23 +49,37 @@ services:
     environment:
       - PANEL_PREFIX=${PANEL_PREFIX:-}
       - PANEL_SECRET_KEY=${PANEL_SECRET_KEY}
-      - PANEL_CLIENTE_PASSWORD=${PANEL_CLIENTE_PASSWORD}
+      # Primer usuario de Datoo; el resto se dan de alta desde el panel.
       - PANEL_DATOO_PASSWORD=${PANEL_DATOO_PASSWORD}
+      - PANEL_DATOO_NAME=${PANEL_DATOO_NAME:-Datoo}
+      - PANEL_DATOO_EMAIL=${PANEL_DATOO_EMAIL:-desarrollo@datoo.es}
       - ODOO_MASTER_PASSWORD=${ODOO_MASTER_PASSWORD}
       - PGPASSWORD=${PG_PASSWORD}
       - PUBLIC_URL=${PUBLIC_URL:-}
       - ENV_NAME=${ENV_NAME:-Entorno de desarrollo}
+      - DEV_DB=${DEV_DB:-}
+      - ENV_SLUG=${ENV_SLUG:-entorno}
+      - SOURCE_SSH=${SOURCE_SSH:-}
+      - SOURCE_DB=${SOURCE_DB:-}
+      - GITHUB_REPO=${GITHUB_REPO:-DatooErp/datoov16}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+    # Grupo dueño de la carpeta de código, para preparar las solicitudes.
+    group_add:
+      - "10002"
     volumes:
       - odoo-dev-backups:/backups
       - odoo-dev-panel-data:/data
-      - ./datoov16:/repos/datoov16:ro
+      - ./datoov16:/repos/datoov16
       - ./modulos_github16:/repos/modulos_github16:ro
+      # Claves que solo usa el panel: subir ramas a GitHub y pedir la copia
+      # de producción. Los asistentes no las ven.
+      - ./ssh-panel:/run/keys:ro
     networks:
       - default
       - control
 
   # Único acceso a Docker del entorno: solo deja reiniciar, leer el registro
-  # y ejecutar comandos en odoo-dev-web y odoo-dev-claude. Nada más del servidor.
+  # y ejecutar comandos en odoo-dev-web y odoo-dev-asistentes. Nada más del servidor.
   dockerproxy:
     image: wollomatic/socket-proxy:1
     container_name: odoo-dev-dockerproxy
@@ -81,40 +95,42 @@ services:
       - -loglevel=info
       - -listenip=0.0.0.0
       - -allowfrom=panel
-      - -allowGET=^/v1\.[0-9]+/(containers/(odoo-dev-web|odoo-dev-claude)/(json|logs)|exec/[a-f0-9]+/json)$
-      - -allowPOST=^/v1\.[0-9]+/(containers/(odoo-dev-web|odoo-dev-claude)/(restart|exec)|exec/[a-f0-9]+/start)$
+      - -allowGET=^/v1\.[0-9]+/(containers/(odoo-dev-web|odoo-dev-asistentes)/(json|logs)|exec/[a-f0-9]+/json)$
+      - -allowPOST=^/v1\.[0-9]+/(containers/(odoo-dev-web|odoo-dev-asistentes)/(restart|exec)|exec/[a-f0-9]+/start)$
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - control
 
   # Asistentes de desarrollo en sesión remota: Claude Code y Codex (ChatGPT).
-  # Escriben solo en ./datoov16 (su rama de desarrollo); modulos_github16 va
-  # en solo lectura.
-  claude:
-    build: ./claude
-    image: odoo-dev-claude
-    container_name: odoo-dev-claude
+  # Un puesto (usuario Unix) por usuario del panel, todos sobre ./datoov16;
+  # modulos_github16 va en solo lectura.
+  asistentes:
+    build: ./asistentes
+    image: odoo-dev-asistentes
+    container_name: odoo-dev-asistentes
     # Nombre con el que el entorno aparece en la aplicación de ChatGPT.
     hostname: ${ENV_HOSTNAME:-odoo-dev}
     restart: unless-stopped
     init: true
-    tty: true
-    stdin_open: true
-    mem_limit: 2g
+    mem_limit: 4g
+    # Solo las capacidades necesarias para lanzar cada proceso con el usuario
+    # de su puesto; los procesos de los puestos no las heredan.
     cap_drop:
       - ALL
+    cap_add:
+      - SETUID
+      - SETGID
     security_opt:
       - no-new-privileges
     environment:
-      - ENV_NAME=${ENV_NAME:-Entorno de desarrollo}
       # No cargar los conectores de la cuenta de Claude (correo, Drive, etc.).
-      # Es una comodidad, no una barrera: usar una cuenta sin conectores sensibles.
+      # Es una comodidad, no una barrera: usar cuentas sin conectores sensibles.
       - ENABLE_CLAUDEAI_MCP_SERVERS=false
     volumes:
       - ./datoov16:/workspace/datoov16
       - ./modulos_github16:/workspace/modulos_github16:ro
-      - odoo-dev-claude-home:/home/dev
+      - odoo-dev-homes:/homes
 
   # Túnel de Cloudflare. Las rutas están en ./cloudflared/config.yml.
   cloudflared:
@@ -137,4 +153,4 @@ volumes:
   odoo-dev-pgdata:
   odoo-dev-backups:
   odoo-dev-panel-data:
-  odoo-dev-claude-home:
+  odoo-dev-homes:

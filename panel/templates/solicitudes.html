@@ -1,0 +1,72 @@
+{% extends "base.html" %}{% block title %}Solicitudes{% endblock %}
+{% block body %}
+<h1>Solicitudes de paso a producción</h1>
+<p class="lead">Los cambios de desarrollo siguen funcionando aquí hasta que Datoo los pasa a producción. Cada usuario solicita los suyos.</p>
+{% if error %}<div class="flash error">No se puede leer el repositorio: {{ error }}</div>{% endif %}
+{% if dirty %}
+<div class="note"><strong>Hay {{ dirty|length }} ficheros con cambios sin confirmar</strong> en la carpeta común. No tienen autor y no se pueden solicitar: pide a tu asistente que confirme los suyos.
+<details><summary>Ver ficheros</summary><p class="mono small">{{ dirty|join(', ') }}</p></details></div>
+{% endif %}
+<div class="card">
+  <h2>Cambios pendientes en <span class="mono">{{ branch }}</span></h2>
+  {% if commits %}
+  <form method="post" action="{{ url_for('panel.request_create') }}">
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <table>
+      <tr><th></th><th>Cambio</th><th>Autor</th><th>Fecha</th><th></th></tr>
+      {% for c in commits %}
+      {% set can = (c.mine or es_datoo) and not c.asked %}
+      <tr>
+        <td>{% if can %}<input type="checkbox" name="sha" value="{{ c.sha }}" {{ 'checked' if c.mine }}>{% endif %}</td>
+        <td>{{ c.subject }} <span class="mono small muted">{{ c.short }}</span></td>
+        <td class="small">{{ c.name }}</td><td class="small">{{ c.date }}</td>
+        <td class="num">{% if c.asked %}<span class="tag warn">Solicitado</span>{% elif c.mine %}<span class="tag ok">Tuyo</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    <div style="margin-top:14px;display:grid;gap:8px;max-width:640px">
+      <label for="title">Título de la solicitud</label>
+      <input id="title" type="text" name="title" maxlength="120" required placeholder="Qué mejora llevan estos cambios">
+      <label for="description">Descripción para Datoo</label>
+      <textarea id="description" name="description" rows="4" placeholder="Qué se ha cambiado, cómo probarlo y qué hay que tener en cuenta"></textarea>
+      <div><button class="primary">Solicitar paso a producción</button></div>
+    </div>
+  </form>
+  {% else %}
+  <p class="muted">No hay cambios confirmados pendientes de pasar a producción.</p>
+  {% endif %}
+</div>
+<div class="card">
+  <h2>Solicitudes del entorno</h2>
+  <table>
+    <tr><th>Solicitud</th><th>Usuario</th><th>Fecha</th><th>Estado</th><th></th></tr>
+    {% for r in reqs %}
+    <tr>
+      <td><strong>{{ r.title }}</strong><br><span class="small muted">{{ r.description }}</span>
+          {% if r.note %}<br><span class="small">Nota de Datoo: {{ r.note }}</span>{% endif %}</td>
+      <td class="small">{{ r.login }}</td><td class="small">{{ r.created }}</td>
+      <td><span class="tag {{ 'ok' if r.status=='en producción' else 'err' if r.status=='rechazada' else 'warn' }}">{{ r.status }}</span></td>
+      <td class="num">
+        {% if es_datoo %}
+        <a class="btn" href="{{ r.pr_url }}" target="_blank" rel="noopener">Ver en GitHub</a>
+        <form method="post" action="{{ url_for('panel.request_status') }}" class="row" style="justify-content:flex-end;margin-top:6px">
+          <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ r.id }}">
+          <input type="text" name="note" placeholder="Nota para el usuario" value="{{ r.note or '' }}" style="width:170px">
+          <select name="status">{% for st in ['pendiente','en producción','rechazada'] %}<option {{ 'selected' if st==r.status }}>{{ st }}</option>{% endfor %}</select>
+          <button>Guardar</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% else %}<tr><td colspan="5" class="muted">Todavía no hay solicitudes.</td></tr>{% endfor %}
+  </table>
+</div>
+{% if es_datoo %}
+<div class="card">
+  <h2>Mantener desarrollo al día</h2>
+  <p class="small muted">Después de pasar cambios a producción, incorpora <span class="mono">main</span> a <span class="mono">{{ branch }}</span> para que los cambios ya publicados dejen de aparecer como pendientes.</p>
+  <form method="post" action="{{ url_for('panel.merge_main') }}"><input type="hidden" name="_csrf" value="{{ csrf }}"><button>Traer main a desarrollo</button></form>
+  {% if not has_token %}<p class="small muted">Sin token de GitHub configurado: el panel sube la rama de cada solicitud y el pull request se abre desde «Ver en GitHub».</p>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

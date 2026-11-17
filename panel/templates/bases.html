@@ -1,7 +1,10 @@
 {% extends "base.html" %}{% block title %}Bases de datos{% endblock %}
 {% block body %}
-<h1>Bases de datos</h1>
+{% if es_datoo %}<h1>Bases de datos</h1>
 <p class="lead">Las copias y los duplicados se crean siempre neutralizados: sin correo, sin tareas programadas y sin envíos al SII.</p>
+{% else %}<h1>Base de datos</h1>
+<p class="lead">La base de datos de desarrollo de la empresa. La comparten todos los usuarios del entorno.</p>{% endif %}
+{% if es_datoo %}
 <div class="card">
   <h2>Crear una base de datos vacía</h2>
   <form method="post" action="{{ url_for('panel.db_create') }}" class="row">
@@ -11,6 +14,22 @@
     <span class="small muted">Solo el módulo base, en español. La contraseña de admin se muestra al terminar.</span>
   </form>
 </div>
+{% endif %}
+{% if dev_db %}
+<div class="card">
+  <h2>Restaurar desde producción</h2>
+  {% if has_source %}
+  <p class="small muted">Sustituye <span class="mono">{{ dev_db }}</span> por una copia reciente de producción, neutralizada, y vuelve a aplicar los cambios que hay en desarrollo. Se pierden los datos de prueba actuales y afecta a todos los usuarios del entorno.</p>
+  <form method="post" action="{{ url_for('panel.production_restore') }}" class="row">
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <input type="text" name="confirm" placeholder="Escribe restaurar para confirmar" required autocomplete="off" style="width:260px">
+    <button class="primary">Restaurar desde producción</button>
+  </form>
+  {% else %}
+  <p class="small muted">El origen de producción todavía no está configurado en este entorno.</p>
+  {% endif %}
+</div>
+{% endif %}
 {% for d in dbs %}
 <div class="card">
   <div class="row" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
@@ -29,6 +48,7 @@
       <button class="primary">Ejecutar</button>
     </form>
   </details>
+  {% if es_datoo %}
   <details>
     <summary>Archivar una copia de seguridad</summary>
     <form method="post" action="{{ url_for('panel.db_backup') }}" class="row">
@@ -52,6 +72,7 @@
       <button class="danger">Eliminar definitivamente</button>
     </form>
   </details>
+  {% endif %}
   </div>
 </div>
 {% else %}

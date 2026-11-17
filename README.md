@@ -12,7 +12,7 @@ no llegue a los servidores de producción ni a la rama de trabajo del cliente.
 | `db` | PostgreSQL exclusivo del entorno. |
 | `panel` | Panel de control (`panel/`): bases de datos, copias, módulos, reinicio. |
 | `dockerproxy` | Único acceso a Docker: solo actúa sobre `odoo-dev-web`. |
-| `claude` | Claude Code en sesión remota. Escribe solo en `datoov16`. |
+| `asistentes` | Claude Code y Codex en sesión remota, un puesto por usuario. |
 | `cloudflared` | Túnel de Cloudflare. El entorno no publica puertos en el servidor. |
 
 ## Despliegue
@@ -26,20 +26,53 @@ no llegue a los servidores de producción ni a la rama de trabajo del cliente.
    `tunnel route dns`) y `cloudflared/config.yml` a partir del ejemplo.
 5. `docker compose up -d --build`.
 
+## Modelo
+
+Un entorno es de **una empresa**: un Odoo, una rama (`desarrollo/<ENV_SLUG>`)
+y una base de datos de desarrollo compartidos por varios usuarios de esa
+empresa. Cada usuario tiene su asistente (Claude o ChatGPT, con su cuenta) y
+hace sus propias solicitudes de paso a producción. Los cambios siguen
+funcionando en desarrollo hasta que Datoo los publica.
+
+No se deben mezclar empresas en un mismo entorno: el código de cualquier
+usuario se ejecuta en el mismo Odoo y puede leer todas sus bases de datos.
+
 ## Panel
 
-Dos perfiles, `cliente` y `datoo`, con contraseña en `.env`. Todas las
-bases de datos que se duplican o restauran quedan neutralizadas: sin correo,
-sin tareas programadas y sin envíos al SII, Veri*Factu ni TicketBAI.
+Los usuarios se dan de alta desde el panel (perfil Datoo). El primero,
+`datoo`, se crea al arrancar con la contraseña de `.env`.
 
-Pendiente (fase 2): solicitud de paso a producción, revisión y merge con
-inicio de sesión de GitHub.
+| | Cliente | Datoo |
+|---|---|---|
+| Reiniciar Odoo, ver el registro | sí | sí |
+| Instalar y actualizar módulos en la base de datos de la empresa | sí | sí |
+| Restaurar la base de datos desde producción | sí | sí |
+| Conectar su cuenta de Claude o ChatGPT | sí | sí |
+| Solicitar el paso a producción de sus commits | sí | sí, de cualquiera |
+| Crear, duplicar, copiar y eliminar bases de datos; archivo de copias | no | sí |
+| Usuarios; estado de las solicitudes; traer `main` a desarrollo | no | sí |
+
+**Restaurar desde producción** pide la copia al servidor de producción
+(`SOURCE_SSH`, con una clave que allí solo puede entregar esa copia), la
+restaura neutralizada (sin correo, sin tareas programadas, sin SII, Veri*Factu
+ni TicketBAI), sustituye la base de datos de la empresa y vuelve a aplicar los
+módulos que desarrollo tiene distintos de `main`.
+
+**Solicitar paso a producción** toma los commits elegidos, los aplica sobre
+`main` en una rama `solicitud/<ENV_SLUG>-<usuario>-<n>` y la sube. Si hay
+`GITHUB_TOKEN`, abre el pull request. Si un commit depende de otros que no van
+en la solicitud, se rechaza con el motivo.
+
+Las claves que usa el panel (subir ramas, pedir la copia) están en
+`ssh-panel/`, que los asistentes no ven.
 
 ## Asistentes: Claude y ChatGPT
 
-El contenedor `claude` lleva Claude Code y Codex (ChatGPT) sobre la misma
-carpeta `datoov16`, y arranca el control remoto de cada uno en cuanto tiene
-una cuenta conectada. Las cuentas se conectan desde el panel:
+El contenedor `asistentes` lleva Claude Code y Codex (ChatGPT). Cada usuario
+del panel ocupa un puesto: un usuario Unix con su carpeta personal, donde
+quedan su cuenta, su firma de git y las instrucciones del asistente. Todos
+trabajan sobre la misma carpeta `datoov16`, y el control remoto de cada uno
+arranca en cuanto conecta su cuenta desde el panel:
 
 - **Claude**: el panel genera el enlace de autorización y recoge el código.
   La sesión se abre desde claude.ai/code o la aplicación de Claude.

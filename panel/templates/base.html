@@ -35,7 +35,7 @@ button,.btn{font:inherit;font-size:14px;padding:6px 12px;border-radius:7px;borde
 button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 button.danger{color:var(--err);border-color:#f3c0ba}
 button:hover,.btn:hover{filter:brightness(.96)}
-input[type=text],input[type=password],select{font:inherit;padding:6px 9px;border:1px solid #cfccc5;border-radius:7px;min-width:0}
+input[type=text],input[type=password],input[type=email],select,textarea{font:inherit;padding:6px 9px;border:1px solid #cfccc5;border-radius:7px;min-width:0}
 form.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 label{font-size:13px;color:var(--mute)}
 details{border-top:1px solid var(--line);padding:8px 0}
@@ -56,13 +56,13 @@ pre.log{background:#16181d;color:#d7dae0;padding:14px;border-radius:8px;overflow
 <header>
   <div class="brand">{{ env_name }}</div>
   <nav>
-    {% for ep, label in [('panel.home','Entorno'),('panel.bases','Bases de datos'),('panel.backups','Copias'),('panel.claude_page','Claude'),('panel.codex_page','ChatGPT'),('panel.activity','Actividad')] %}
+    {% for ep, label in nav %}
     <a href="{{ url_for(ep) }}" class="{{ 'on' if request.endpoint == ep }}">{{ label }}</a>
     {% endfor %}
   </nav>
   <div class="who">
     {% if busy %}<span class="tag warn">Operación en curso</span>{% endif %}
-    <span>{{ role }}</span>
+    <span>{{ me.name }} · {{ role }}</span>
     <form method="post" action="{{ url_for('panel.logout') }}"><input type="hidden" name="_csrf" value="{{ csrf }}"><button>Salir</button></form>
   </div>
 </header>
