@@ -35,12 +35,19 @@ sin tareas programadas y sin envíos al SII, Veri*Factu ni TicketBAI.
 Pendiente (fase 2): solicitud de paso a producción, revisión y merge con
 inicio de sesión de GitHub.
 
-## Claude Code
+## Asistentes: Claude y ChatGPT
 
-El contenedor `claude` arranca Remote Control en cuanto hay una cuenta
-conectada. La cuenta se conecta desde el panel, en la sección Claude: genera
-el enlace de autorización y recoge el código que devuelve Claude.
+El contenedor `claude` lleva Claude Code y Codex (ChatGPT) sobre la misma
+carpeta `datoov16`, y arranca el control remoto de cada uno en cuanto tiene
+una cuenta conectada. Las cuentas se conectan desde el panel:
 
-La cuenta de Claude del entorno debe ser la del cliente, o una dedicada, **sin
+- **Claude**: el panel genera el enlace de autorización y recoge el código.
+  La sesión se abre desde claude.ai/code o la aplicación de Claude.
+- **ChatGPT**: el panel muestra el enlace y el código de dispositivo, y genera
+  los códigos de emparejamiento. Se maneja desde la aplicación móvil de
+  ChatGPT o la de escritorio de Codex; la web de Codex no sirve para esto.
+  El control remoto de Codex es experimental.
+
+Las cuentas del entorno deben ser las del cliente, o dedicadas, **sin
 conectores con acceso a otros sistemas**: una sesión iniciada con esa cuenta
 puede usar sus conectores aunque el contenedor esté aislado.

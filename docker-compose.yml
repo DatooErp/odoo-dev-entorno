@@ -88,12 +88,15 @@ services:
     networks:
       - control
 
-  # Claude Code en sesión remota. Escribe solo en ./datoov16 (su rama de
-  # desarrollo); modulos_github16 va en solo lectura.
+  # Asistentes de desarrollo en sesión remota: Claude Code y Codex (ChatGPT).
+  # Escriben solo en ./datoov16 (su rama de desarrollo); modulos_github16 va
+  # en solo lectura.
   claude:
     build: ./claude
     image: odoo-dev-claude
     container_name: odoo-dev-claude
+    # Nombre con el que el entorno aparece en la aplicación de ChatGPT.
+    hostname: ${ENV_HOSTNAME:-odoo-dev}
     restart: unless-stopped
     init: true
     tty: true

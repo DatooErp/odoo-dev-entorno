@@ -1,0 +1,58 @@
+{% extends "base.html" %}{% block title %}ChatGPT{% endblock %}
+{% block body %}
+<h1>ChatGPT</h1>
+<p class="lead">La cuenta de ChatGPT con la que se desarrolla en este entorno, mediante Codex. Su uso cuenta contra la suscripción de esa cuenta.</p>
+{% if not c.ok %}
+<div class="flash error">No se puede consultar el contenedor de desarrollo: {{ c.error }}</div>
+{% elif c.logged %}
+{% if pair %}
+<div class="note"><strong>Código de emparejamiento: <span class="mono">{{ pair }}</span></strong><br>
+Introdúcelo en la aplicación de ChatGPT, en Codex, al conectar un equipo. Caduca en 10 minutos.</div>
+{% endif %}
+<div class="grid">
+  <div class="card">
+    <h2>Cuenta</h2>
+    <p><span class="tag ok">Conectada</span></p>
+    <form method="post" action="{{ url_for('panel.codex_logout') }}" onsubmit="return confirm('¿Desconectar la cuenta de ChatGPT de este entorno?')">
+      <input type="hidden" name="_csrf" value="{{ csrf }}"><button class="danger">Desconectar cuenta</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2>Control remoto</h2>
+    {% if c.rc %}
+    <p><span class="tag ok">Activo</span></p>
+    <p class="small muted">Se maneja desde la aplicación móvil de ChatGPT o la de escritorio de Codex, no desde la web. Cada dispositivo se empareja una vez.</p>
+    <form method="post" action="{{ url_for('panel.codex_pair') }}">
+      <input type="hidden" name="_csrf" value="{{ csrf }}"><button class="primary">Generar código de emparejamiento</button>
+    </form>
+    {% else %}
+    <p><span class="tag warn">arrancando</span></p>
+    <p class="small muted">Tarda hasta un minuto tras conectar la cuenta. <a href="{{ url_for('panel.codex_page') }}">Actualizar</a></p>
+    {% endif %}
+  </div>
+</div>
+{% elif c.login_code %}
+<div class="card">
+  <h2>Conectar cuenta: dos pasos</h2>
+  <p><strong>1.</strong> Abre la página de OpenAI e inicia sesión con tu cuenta de ChatGPT.</p>
+  <p><a class="btn" href="{{ c.login_url }}" target="_blank" rel="noopener">Abrir la página de autorización</a></p>
+  <p><strong>2.</strong> Introduce allí este código: <strong class="mono" style="font-size:18px">{{ c.login_code }}</strong></p>
+  <p class="small muted">Caduca en 15 minutos. Si tu cuenta no admite el inicio por código, actívalo en sus ajustes de seguridad.</p>
+  <div class="row" style="display:flex;gap:8px">
+    <a class="btn" href="{{ url_for('panel.codex_page') }}">Ya lo he autorizado</a>
+    <form method="post" action="{{ url_for('panel.codex_login') }}">
+      <input type="hidden" name="_csrf" value="{{ csrf }}"><button>Generar un código nuevo</button>
+    </form>
+  </div>
+</div>
+{% else %}
+<div class="card">
+  <h2>Cuenta</h2>
+  <p><span class="tag">Sin conectar</span></p>
+  <p class="small muted">Usa una cuenta con suscripción de ChatGPT. Evita cuentas que tengan conectores con acceso a otros sistemas.</p>
+  <form method="post" action="{{ url_for('panel.codex_login') }}">
+    <input type="hidden" name="_csrf" value="{{ csrf }}"><button class="primary">Conectar cuenta</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

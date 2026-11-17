@@ -218,9 +218,10 @@ def odoo_exec(job, cmd):
 
 # -------------------------------------------------------------------- claude
 def cexec(cmd, timeout=40):
-    """Ejecuta un comando corto en el contenedor de Claude Code."""
+    """Ejecuta un comando corto en el contenedor de los asistentes."""
     r = docker("POST", f"/containers/{CLAUDE_CONTAINER}/exec", json=dict(
-        AttachStdout=True, AttachStderr=True, Tty=True, Cmd=cmd))
+        AttachStdout=True, AttachStderr=True, Tty=True, Cmd=cmd,
+        WorkingDir="/workspace/datoov16"))
     if r.status_code != 201:
         raise RuntimeError(f"El contenedor de Claude no responde ({r.status_code}).")
     eid = r.json()["Id"]
@@ -264,6 +265,26 @@ def claude_info():
                 info["rc_url"] = m.group(0) if m else "https://claude.ai/code"
             else:
                 info["rc"] = "arrancando"
+    except Exception as e:
+        info.update(ok=False, error=str(e))
+    return info
+
+
+
+def codex_info():
+    """Estado de la cuenta de ChatGPT (Codex) y de su control remoto."""
+    info = dict(ok=True, logged=False, rc=False, login_url="", login_code="")
+    try:
+        _code, out = cexec(["codex", "login", "status"])
+        info["logged"] = "Logged in" in out
+        if info["logged"]:
+            info["rc"] = cexec(["pgrep", "-f", "app-server --remote-control"])[0] == 0
+        else:
+            pane = tmux_pane("cxlogin") or ""
+            url = re.search(r"https://auth\.openai\.com/\S+", pane)
+            code = re.search(r"\b[A-Z0-9]{4}-[A-Z0-9]{4,6}\b", pane)
+            if url and code:
+                info.update(login_url=url.group(0), login_code=code.group(0))
     except Exception as e:
         info.update(ok=False, error=str(e))
     return info
@@ -716,6 +737,53 @@ def claude_logout():
     except Exception as e:
         flash(f"No se pudo desconectar: {e}", "error")
     return redirect(url_for("panel.claude_page"))
+
+
+@bp.route("/chatgpt")
+def codex_page():
+    return render_template("chatgpt.html", c=codex_info(), pair=session.pop("pair", None))
+
+
+@bp.route("/chatgpt/entrar", methods=["POST"])
+def codex_login():
+    try:
+        cexec(["tmux", "kill-session", "-t", "cxlogin"])
+        cexec(["tmux", "new-session", "-d", "-s", "cxlogin", "-x", "200", "-y", "50",
+               "codex login --device-auth; sleep 30"])
+        for _ in range(10):
+            time.sleep(1.5)
+            if codex_info()["login_code"]:
+                break
+        audit(session["user"], "Iniciar conexión de la cuenta de ChatGPT", client_ip())
+    except Exception as e:
+        flash(f"No se pudo iniciar la conexión: {e}", "error")
+    return redirect(url_for("panel.codex_page"))
+
+
+@bp.route("/chatgpt/emparejar", methods=["POST"])
+def codex_pair():
+    try:
+        _code, out = cexec(["codex", "remote-control", "pair", "--json"])
+        m = re.search(r'"manualPairingCode"\s*:\s*"([A-Z0-9-]+)"', out)
+        if not m:
+            raise RuntimeError("Codex no ha devuelto un código. El control remoto puede no estar arrancado.")
+        session["pair"] = m.group(1)
+        audit(session["user"], "Generar código de emparejamiento de ChatGPT", client_ip(), "correcto")
+    except Exception as e:
+        flash(f"No se pudo generar el código: {e}", "error")
+    return redirect(url_for("panel.codex_page"))
+
+
+@bp.route("/chatgpt/salir", methods=["POST"])
+def codex_logout():
+    try:
+        cexec(["codex", "remote-control", "stop"])
+        cexec(["codex", "logout"])
+        audit(session["user"], "Desconectar cuenta de ChatGPT", client_ip(), "correcto")
+        flash("Cuenta de ChatGPT desconectada del entorno.", "ok")
+    except Exception as e:
+        flash(f"No se pudo desconectar: {e}", "error")
+    return redirect(url_for("panel.codex_page"))
 
 
 @bp.route("/actividad")
