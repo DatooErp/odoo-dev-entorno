@@ -20,9 +20,11 @@
     <p><span class="tag ok">Conectada</span></p>
     <p class="small muted">Abre la sesión desde la pestaña Code de la aplicación de Claude, con esa misma cuenta.</p>
     <a class="btn" href="{{ c.rc_url }}" target="_blank" rel="noopener">Abrir en Claude</a>
+    <a class="btn" href="{{ url_for('panel.terminal_page', tool='claude') }}">Abrir aquí, en el panel</a>
     {% else %}
     <p><span class="tag warn">{{ c.rc }}</span></p>
     <p class="small muted">Tarda hasta un minuto en arrancar tras conectar la cuenta. <a href="{{ url_for('panel.claude_page') }}">Actualizar</a></p>
+    <a class="btn" href="{{ url_for('panel.terminal_page', tool='claude') }}">Abrir aquí, en el panel</a>
     {% endif %}
   </div>
 </div>

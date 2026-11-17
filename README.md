@@ -65,6 +65,19 @@ además pedir la copia directamente a producción.
 `GITHUB_TOKEN`, abre el pull request. Si un commit depende de otros que no van
 en la solicitud, se rechaza con el motivo.
 
+**Revisión automática.** Cada solicitud se prueba aislada: sus módulos se
+actualizan o instalan en una copia de la base de datos de la empresa cargando
+solo `main` más la solicitud. Después un agente (el Claude de un usuario de
+Datoo, sin herramientas: solo lee el encargo) redacta un informe con
+clasificación, riesgos, revisión del código y veredicto. El informe se ve en
+el panel y, si hay token, se publica en el pull request.
+
+**Ventana de terminal.** Cada usuario puede abrir Claude Code o Codex dentro
+del panel, sin instalar nada. El panel hace de puente autenticado hasta el
+contenedor de asistentes (`asistentes/terminal.py`), que lanza la herramienta
+con el usuario del puesto dentro de tmux, de modo que la conversación
+sobrevive a cerrar la página.
+
 Las claves que usa el panel (subir ramas, pedir la copia) están en
 `ssh-panel/`, que los asistentes no ven.
 

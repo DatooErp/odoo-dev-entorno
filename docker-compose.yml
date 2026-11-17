@@ -20,6 +20,8 @@ services:
       - odoo-dev-data:/var/lib/odoo
       - ./datoov16:/mnt/addons/datoov16:ro
       - ./modulos_github16:/mnt/addons/modulos_github16:ro
+      # Código de las solicitudes en revisión, para probarlo aislado.
+      - ./revision:/mnt/revision:ro
 
   db:
     image: postgres:13.0-alpine
@@ -64,12 +66,14 @@ services:
       - SOURCE_DB=${SOURCE_DB:-}
       - GITHUB_REPO=${GITHUB_REPO:-DatooErp/datoov16}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - TERMINAL_SECRET=${TERMINAL_SECRET:-}
     # Grupo dueño de la carpeta de código, para preparar las solicitudes.
     group_add:
       - "10002"
     volumes:
       - odoo-dev-backups:/backups
       - odoo-dev-panel-data:/data
+      - ./revision:/revision
       # Copias grandes que Datoo deja en el servidor para restaurarlas.
       - ./entrada:/entrada:ro
       - ./datoov16:/repos/datoov16
@@ -134,6 +138,11 @@ services:
       - ./datoov16:/workspace/datoov16
       - ./modulos_github16:/workspace/modulos_github16:ro
       - odoo-dev-homes:/homes
+      # Solicitudes en revisión: el agente revisor lee de aquí su encargo.
+      - ./revision:/workspace/revision:ro
+      # Secreto compartido con el panel para las ventanas de terminal. Solo
+      # root puede leerlo; los puestos no.
+      - ./terminal.secret:/run/terminal.secret:ro
 
   # Túnel de Cloudflare. Las rutas están en ./cloudflared/config.yml.
   cloudflared:

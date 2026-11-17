@@ -18,6 +18,11 @@ Introdúcelo en la aplicación de ChatGPT, en Codex, al conectar un equipo. Cadu
     </form>
   </div>
   <div class="card">
+    <h2>En el panel</h2>
+    <p class="small muted">Codex en una ventana de este panel, sin instalar ninguna aplicación.</p>
+    <a class="btn" href="{{ url_for('panel.terminal_page', tool='codex') }}">Abrir Codex aquí</a>
+  </div>
+  <div class="card">
     <h2>Control remoto</h2>
     {% if c.rc %}
     <p><span class="tag ok">Activo</span></p>

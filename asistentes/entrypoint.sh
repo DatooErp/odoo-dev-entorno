@@ -5,6 +5,11 @@
 # cada proceso con el usuario de su puesto.
 echo "Contenedor de asistentes arrancado."
 while true; do
+  # Puente de las ventanas de terminal del panel.
+  if [ -s /run/terminal.secret ] && ! pgrep -f "terminal.py" >/dev/null 2>&1; then
+    python3 /usr/local/bin/terminal.py &
+    echo "Puente de terminal arrancado."
+  fi
   for i in 1 2 3 4 5 6 7 8; do
     u="u$i"; h="/homes/$u"
     como() { setpriv --reuid "$u" --regid devs --init-groups env HOME="$h" USER="$u" "$@"; }

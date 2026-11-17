@@ -1,0 +1,31 @@
+{% extends "base.html" %}{% block title %}Terminal de {{ label }}{% endblock %}
+{% block body %}
+<link rel="stylesheet" href="{{ url_for('panel.static_file', name='xterm.css') }}">
+<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap">
+  <h1 style="margin:0">{{ label }}</h1>
+  <span id="st" class="tag warn">conectando</span>
+  <span class="small muted" style="flex:1">Trabaja sobre la carpeta común del entorno. Si cierras esta página, la conversación sigue y la recuperas al volver.</span>
+  <a class="btn" href="{{ back }}">Volver</a>
+</div>
+<div id="term" style="height:calc(100vh - 190px);min-height:320px;background:#16181d;border-radius:8px;padding:8px"></div>
+<script src="{{ url_for('panel.static_file', name='xterm.js') }}"></script>
+<script src="{{ url_for('panel.static_file', name='xterm-addon-fit.js') }}"></script>
+<script>
+(function(){
+  var st=document.getElementById('st');
+  var term=new Terminal({cursorBlink:true,fontSize:14,scrollback:5000,
+    fontFamily:'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',theme:{background:'#16181d'}});
+  var fit=new FitAddon.FitAddon(); term.loadAddon(fit); term.open(document.getElementById('term')); fit.fit();
+  var url=(location.protocol==='https:'?'wss://':'ws://')+location.host+'{{ url_for("panel.terminal_ws", tool=tool) }}';
+  var ws=new WebSocket(url); ws.binaryType='arraybuffer'; var enc=new TextEncoder();
+  function size(){ if(ws.readyState===1) ws.send(JSON.stringify({resize:[term.cols,term.rows]})); }
+  function state(text,cls){ st.textContent=text; st.className='tag '+cls; }
+  ws.onopen=function(){ state('conectado','ok'); size(); term.focus(); };
+  ws.onmessage=function(e){ term.write(typeof e.data==='string'?e.data:new Uint8Array(e.data)); };
+  ws.onclose=function(){ state('desconectado','err'); term.write('\r\n\x1b[33m[Sesión cerrada. Recarga la página para volver a entrar.]\x1b[0m\r\n'); };
+  term.onData(function(d){ if(ws.readyState===1) ws.send(enc.encode(d)); });
+  term.onResize(size);
+  window.addEventListener('resize',function(){ fit.fit(); });
+})();
+</script>
+{% endblock %}

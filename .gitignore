@@ -8,6 +8,8 @@ cloudflared/config.yml
 ssh/
 ssh-panel/
 entrada/
+revision/
+terminal.secret
 datoov16/
 modulos_github16/
 __pycache__/

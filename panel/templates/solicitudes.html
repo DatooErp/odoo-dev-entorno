@@ -45,9 +45,13 @@
       <td><strong>{{ r.title }}</strong><br><span class="small muted">{{ r.description }}</span>
           {% if r.note %}<br><span class="small">Nota de Datoo: {{ r.note }}</span>{% endif %}</td>
       <td class="small">{{ r.login }}</td><td class="small">{{ r.created }}</td>
-      <td><span class="tag {{ 'ok' if r.status=='en producción' else 'err' if r.status=='rechazada' else 'warn' }}">{{ r.status }}</span></td>
+      <td><span class="tag {{ 'ok' if r.status=='en producción' else 'err' if r.status=='rechazada' else 'warn' }}">{{ r.status }}</span>
+          {% if r.verdict %}<br><span class="tag {{ 'ok' if r.verdict=='APTO' else 'err' if r.verdict=='NO APTO' else 'warn' }}" style="margin-top:4px">{{ r.verdict }}</span>{% endif %}</td>
       <td class="num">
+        <a class="btn" href="{{ url_for('panel.request_view', sid=r.id) }}">Ver informe</a>
         {% if es_datoo %}
+        <form method="post" action="{{ url_for('panel.request_review') }}" style="display:inline">
+          <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ r.id }}"><button>Repetir revisión</button></form>
         <a class="btn" href="{{ r.pr_url }}" target="_blank" rel="noopener">Ver en GitHub</a>
         <form method="post" action="{{ url_for('panel.request_status') }}" class="row" style="justify-content:flex-end;margin-top:6px">
           <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ r.id }}">

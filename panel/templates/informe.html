@@ -1,0 +1,16 @@
+{% extends "base.html" %}{% block title %}{{ s.title }}{% endblock %}
+{% block body %}
+<h1>{{ s.title }}</h1>
+<p class="lead">Solicitud de {{ s.login }} · {{ s.created }} ·
+  <span class="tag {{ 'ok' if s.status=='en producción' else 'err' if s.status=='rechazada' else 'warn' }}">{{ s.status }}</span>
+  {% if s.verdict %}<span class="tag {{ 'ok' if s.verdict=='APTO' else 'err' if s.verdict=='NO APTO' else 'warn' }}">Revisión: {{ s.verdict }}</span>{% endif %}</p>
+{% if s.description %}<div class="card"><h2>Descripción</h2><p style="white-space:pre-wrap;margin:0">{{ s.description }}</p></div>{% endif %}
+{% if s.note %}<div class="note">Nota de Datoo: {{ s.note }}</div>{% endif %}
+<div class="card">
+  <h2>Informe de la revisión automática {% if s.reviewed %}<span class="small muted">{{ s.reviewed }}</span>{% endif %}</h2>
+  {% if s.report %}<pre style="white-space:pre-wrap;font:14px/1.55 inherit;margin:0">{{ s.report }}</pre>
+  <p class="small muted">Lo redacta un agente a partir de los cambios de la solicitud y de una prueba de actualización en una copia de la base de datos. Orienta a Datoo; no sustituye su revisión.</p>
+  {% else %}<p class="muted">Todavía no hay informe para esta solicitud.</p>{% endif %}
+</div>
+<p><a class="btn" href="{{ url_for('panel.requests_page') }}">Volver a solicitudes</a></p>
+{% endblock %}
