@@ -7,13 +7,13 @@
   <span class="small muted" style="flex:1">Trabaja sobre la carpeta común del entorno. Si cierras esta página, la conversación sigue y la recuperas al volver.</span>
   <a class="btn" href="{{ back }}">Volver</a>
 </div>
-<div id="term" style="height:calc(100vh - 190px);min-height:320px;background:#16181d;border-radius:8px;padding:8px"></div>
+<div id="term" style="height:calc(100dvh - 190px);min-height:280px;background:#16181d;border-radius:8px;padding:8px"></div>
 <script src="{{ url_for('panel.static_file', name='xterm.js') }}"></script>
 <script src="{{ url_for('panel.static_file', name='xterm-addon-fit.js') }}"></script>
 <script>
 (function(){
   var st=document.getElementById('st');
-  var term=new Terminal({cursorBlink:true,fontSize:14,scrollback:5000,
+  var term=new Terminal({cursorBlink:true,fontSize:(window.innerWidth<720?11:14),scrollback:5000,
     fontFamily:'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',theme:{background:'#16181d'}});
   var fit=new FitAddon.FitAddon(); term.loadAddon(fit); term.open(document.getElementById('term')); fit.fit();
   var url=(location.protocol==='https:'?'wss://':'ws://')+location.host+'{{ url_for("panel.terminal_ws", tool=tool) }}';

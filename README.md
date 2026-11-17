@@ -98,6 +98,8 @@ Los asistentes aplican ellos mismos lo que desarrollan, sin acceso a Docker:
 | `entorno reiniciar` | reinicia Odoo |
 | `entorno registro [líneas]` | final del registro de Odoo |
 | `entorno estado` | estado de Odoo y de la base de datos |
+| `entorno pendientes` | commits del usuario aún sin solicitar |
+| `entorno solicitar "<título>" "<descripción>"` | solicita el paso a producción de esos commits |
 
 La orden llama al panel con una credencial propia de cada puesto
 (`~/.entorno-token`, que se renueva en cada inicio de sesión en el panel), y

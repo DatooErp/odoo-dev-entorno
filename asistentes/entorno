@@ -18,6 +18,9 @@ USO = """Uso:
   entorno reiniciar                         reinicia Odoo (cambios solo de Python)
   entorno registro [lineas]                 últimas líneas del registro de Odoo
   entorno estado                            estado de Odoo y de la base de datos
+  entorno pendientes                        tus commits aún sin solicitar
+  entorno solicitar "<título>" ["<descripción>"] [--commits sha,sha]
+                                            solicita el paso a producción
 
 Los cambios de un frontend React no necesitan nada de esto: se compilan con
 «npm run build» en la carpeta frontend del módulo y se ven al recargar."""
@@ -79,8 +82,17 @@ def main():
         status, body = call("registro?lineas=" + (args[1] if len(args) == 2 else "200"))
         print(body.get("texto") or body.get("error", f"Error {status}"))
         sys.exit(0 if status == 200 else 1)
-    elif args[0] == "estado" and len(args) == 1:
-        status, body = call("estado")
+    elif args[0] == "solicitar" and len(args) >= 2:
+        rest, commits = args[1:], []
+        if "--commits" in rest:
+            i = rest.index("--commits")
+            commits = [c for c in "".join(rest[i + 1:i + 2]).split(",") if c]
+            rest = rest[:i] + rest[i + 2:]
+        if not 1 <= len(rest) <= 2:
+            sys.exit(USO)
+        run("solicitar", {"titulo": rest[0], "descripcion": rest[1] if len(rest) == 2 else "", "commits": commits})
+    elif args[0] in ("estado", "pendientes") and len(args) == 1:
+        status, body = call(args[0])
         print(body.get("texto") or body.get("error", f"Error {status}"))
         sys.exit(0 if status == 200 else 1)
     else:

@@ -414,6 +414,21 @@ tal cual.
   generados. Al solicitar el paso a producción, el panel compila de nuevo a
   partir del código.
 
+## Paso a producción
+
+Solo cuando la persona te lo pida de forma expresa:
+
+- `entorno pendientes` muestra tus commits aún no solicitados y los ficheros
+  sin confirmar.
+- `entorno solicitar "<título>" "<descripción>"` solicita el paso a
+  producción de todos tus commits pendientes. En la descripción explica qué
+  cambia y cómo probarlo. Añade `--commits <sha,sha>` para pedir solo algunos.
+- La solicitud se compila y se revisa sola; al terminar verás el veredicto.
+  Cuéntaselo a la persona tal cual. Datoo decide y publica: no des el cambio
+  por publicado.
+
+No solicites por tu cuenta, ni cambios sin confirmar o sin probar.
+
 ## Git
 
 - Responde y escribe los mensajes de commit en español.
@@ -875,7 +890,9 @@ def review_request(job, sid, base, name, wt):
     m = re.findall(r"VEREDICTO:\s*(APTO CON OBSERVACIONES|NO APTO|APTO)", report)
     verdict = m[-1] if m else ("NO APTO" if result.startswith("FALLIDA") else "SIN VEREDICTO")
     sql("UPDATE solicitudes SET report=?, verdict=?, reviewed=? WHERE id=?", (report, verdict, now(), sid))
-    job.log(f"Informe guardado. Veredicto: {verdict}.")
+    job.log(f"Informe de la revisión automática. Veredicto: {verdict}.")
+    for line in report.splitlines()[-40:]:
+        job.log("  " + line)
     pr = re.search(r"/pull/(\d+)$", sol["pr_url"] or "")
     if GITHUB_TOKEN and pr:
         requests.post(f"https://api.github.com/repos/{GITHUB_REPO}/issues/{pr.group(1)}/comments", timeout=30,
@@ -1714,6 +1731,55 @@ def api_action(accion):
 
         return api_job(f"{accion.capitalize()} {mods} en {DEV_DB} (asistente)", run)
     return jsonify(error="Orden desconocida."), 404
+
+
+def my_pending():
+    """Commits del usuario que aún no están en main ni en una solicitud, y
+    ficheros con cambios sin confirmar en la carpeta común."""
+    u = puesto()
+    git_fetch()
+    dev_sync(u)
+    mine = g.user["email"].lower()
+    return [c for c in pending_commits() if c["email"] == mine and not c["asked"]], dirty_files(u)
+
+
+@bp.route("/api/asistente/pendientes")
+def api_pending():
+    try:
+        commits, dirty = my_pending()
+    except Exception as e:
+        return jsonify(error=f"No se puede leer el repositorio: {e}"), 502
+    lines = [f"Commits tuyos pendientes de solicitar ({len(commits)}):"]
+    lines += [f"  {c['short']}  {c['date']}  {c['subject']}" for c in reversed(commits)] or ["  ninguno"]
+    if dirty:
+        lines += [f"Ficheros con cambios sin confirmar en la carpeta común ({len(dirty)}), que no se pueden solicitar:"]
+        lines += [f"  {f}" for f in dirty[:40]]
+    return jsonify(texto="\n".join(lines))
+
+
+@bp.route("/api/asistente/solicitar", methods=["POST"])
+def api_request():
+    data = request.get_json(silent=True) or {}
+    title = str(data.get("titulo", "")).strip()[:120]
+    description = str(data.get("descripcion", "")).strip()[:4000]
+    if not title:
+        return jsonify(error="Indica un título para la solicitud."), 400
+    try:
+        commits, _dirty = my_pending()
+    except Exception as e:
+        return jsonify(error=f"No se puede leer el repositorio: {e}"), 502
+    allowed = {c["sha"]: c for c in commits}
+    wanted = [str(x) for x in data.get("commits") or []]
+    shas = [sha for sha in allowed if not wanted or any(sha.startswith(w) and len(w) >= 7 for w in wanted)]
+    if not shas or (wanted and len(shas) != len(wanted)):
+        return jsonify(error="No hay commits tuyos pendientes que solicitar, o alguno de los indicados "
+                             "no es tuyo o ya está solicitado. Consulta «entorno pendientes»."), 400
+    user = dict(g.user)
+    job = start_job(f"Solicitar paso a producción: {title}",
+                    lambda job: create_request(job, user, title, description, shas), user=user["login"])
+    if not job:
+        return jsonify(error="Hay otra operación en curso en el entorno."), 409
+    return jsonify(tarea=job.id)
 
 
 @bp.route("/api/asistente/tarea/<jid>")

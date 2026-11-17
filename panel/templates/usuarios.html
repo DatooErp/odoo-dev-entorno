@@ -21,7 +21,7 @@
     <tr>
       <td class="mono">{{ u.login }}</td><td>{{ u.name }}</td><td class="small">{{ u.email }}</td>
       <td class="small">{{ 'Datoo' if u.role == 'datoo' else 'Cliente' }}</td>
-      <td class="small">{% if not u.active %}<span class="tag">Baja</span>{% elif u.slot %}{{ u.slot }}{% else %}—{% endif %}</td>
+      <td class="small">{% if not u.active %}<span class="tag">Baja</span>{% elif u.slot %}Puesto {{ u.slot }}{% else %}Sin puesto{% endif %}</td>
       <td class="num">{% if u.active %}
         <form method="post" action="{{ url_for('panel.user_password') }}" style="display:inline">
           <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ u.id }}"><button>Nueva contraseña</button></form>
