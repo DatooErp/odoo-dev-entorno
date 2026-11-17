@@ -65,7 +65,7 @@ services:
       - control
 
   # Único acceso a Docker del entorno: solo deja reiniciar, leer el registro
-  # y ejecutar comandos en el contenedor odoo-dev-web. Nada más del servidor.
+  # y ejecutar comandos en odoo-dev-web y odoo-dev-claude. Nada más del servidor.
   dockerproxy:
     image: wollomatic/socket-proxy:1
     container_name: odoo-dev-dockerproxy
@@ -81,8 +81,8 @@ services:
       - -loglevel=info
       - -listenip=0.0.0.0
       - -allowfrom=panel
-      - -allowGET=^/v1\.[0-9]+/(containers/odoo-dev-web/(json|logs)|exec/[a-f0-9]+/json)$
-      - -allowPOST=^/v1\.[0-9]+/(containers/odoo-dev-web/(restart|exec)|exec/[a-f0-9]+/start)$
+      - -allowGET=^/v1\.[0-9]+/(containers/(odoo-dev-web|odoo-dev-claude)/(json|logs)|exec/[a-f0-9]+/json)$
+      - -allowPOST=^/v1\.[0-9]+/(containers/(odoo-dev-web|odoo-dev-claude)/(restart|exec)|exec/[a-f0-9]+/start)$
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:

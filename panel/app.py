@@ -35,6 +35,7 @@ PG = dict(host=env("PGHOST", "db"), port=env("PGPORT", "5432"),
           user=env("PGUSER", "odoo"), password=env("PGPASSWORD", ""))
 DOCKER_URL = env("DOCKER_URL", "http://dockerproxy:2375") + "/v1.41"
 ODOO_CONTAINER = env("ODOO_CONTAINER", "odoo-dev-web")
+CLAUDE_CONTAINER = env("CLAUDE_CONTAINER", "odoo-dev-claude")
 BACKUP_DIR = env("BACKUP_DIR", "/backups")
 SOURCE_DIR = env("SOURCE_DIR", "")          # copias de producción (solo lectura)
 DATA_DIR = env("DATA_DIR", "/data")
@@ -47,6 +48,8 @@ ROLE_LABEL = {"cliente": "Cliente", "datoo": "Datoo"}
 
 DB_RE = re.compile(r"^[a-z0-9][a-z0-9_]{1,49}$")
 MODS_RE = re.compile(r"^[a-z0-9_]+(,[a-z0-9_]+)*$")
+CODE_RE = re.compile(r"^[A-Za-z0-9_\-#]{20,400}$")
+ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07|\r")
 BACKUP_EXT = (".zip", ".dump")
 
 app = Flask(__name__, static_folder=None)
@@ -211,6 +214,60 @@ def odoo_exec(job, cmd):
     code = docker("GET", f"/exec/{eid}/json").json().get("ExitCode")
     if code != 0:
         raise RuntimeError(f"El comando terminó con código {code}")
+
+
+# -------------------------------------------------------------------- claude
+def cexec(cmd, timeout=40):
+    """Ejecuta un comando corto en el contenedor de Claude Code."""
+    r = docker("POST", f"/containers/{CLAUDE_CONTAINER}/exec", json=dict(
+        AttachStdout=True, AttachStderr=True, Tty=True, Cmd=cmd))
+    if r.status_code != 201:
+        raise RuntimeError(f"El contenedor de Claude no responde ({r.status_code}).")
+    eid = r.json()["Id"]
+    out = docker("POST", f"/exec/{eid}/start", json=dict(Detach=False, Tty=True), timeout=timeout).text
+    code = docker("GET", f"/exec/{eid}/json").json().get("ExitCode")
+    return code, ANSI_RE.sub("", out)
+
+
+def tmux_pane(name):
+    """Texto de una ventana de tmux del contenedor, o None si no existe."""
+    code, out = cexec(["tmux", "capture-pane", "-p", "-J", "-t", name])
+    return out if code == 0 else None
+
+
+def claude_info():
+    """Estado de la cuenta de Claude y de Remote Control en el entorno."""
+    info = dict(ok=True, logged=False, email="", org="", plan="", rc="parado", rc_url="", login_url="")
+    try:
+        _code, out = cexec(["claude", "auth", "status"])
+        m = re.search(r"\{.*\}", out, re.S)
+        st = json.loads(m.group(0)) if m else {}
+        info.update(logged=bool(st.get("loggedIn")), email=st.get("email") or "",
+                    org=st.get("orgName") or "", plan=st.get("subscriptionType") or "")
+        pane = tmux_pane("login")
+        if pane and not info["logged"]:
+            m = re.search(r"https://\S+", pane)
+            info["login_url"] = m.group(0) if m else ""
+        pane = tmux_pane("rc")
+        if pane is not None:
+            # Preguntas iniciales de Remote Control: confiar en la carpeta del
+            # entorno, activarlo y compartir el directorio de trabajo.
+            last = pane.strip().splitlines()[-1] if pane.strip() else ""
+            answer = ("y" if re.search(r"\[y/N\]\s*$|\(y/n\)\s*$", last)
+                      else "1" if re.search(r"Choose \[1/2\].*:\s*$", last) else "")
+            if answer:
+                cexec(["tmux", "send-keys", "-t", "rc", answer, "Enter"])
+                info["rc"] = "configurando"
+            elif "Connected" in pane:
+                info["rc"] = "conectado"
+                m = re.search(r"https://claude\.ai/code\S*", pane)
+                info["rc_url"] = m.group(0) if m else "https://claude.ai/code"
+            else:
+                info["rc"] = "arrancando"
+    except Exception as e:
+        info.update(ok=False, error=str(e))
+    return info
+
 
 
 # ------------------------------------------------------------- bases de datos
@@ -598,6 +655,67 @@ def backup_delete():
     audit(session["user"], f"Eliminar copia {os.path.basename(path)}", result="correcto")
     flash("Copia eliminada.", "ok")
     return redirect(url_for("panel.backups"))
+
+
+@bp.route("/claude")
+def claude_page():
+    return render_template("claude.html", c=claude_info())
+
+
+@bp.route("/claude/entrar", methods=["POST"])
+def claude_login():
+    try:
+        cexec(["tmux", "kill-session", "-t", "login"])
+        cexec(["tmux", "new-session", "-d", "-s", "login", "-x", "400", "-y", "50", "claude auth login"])
+        for _ in range(10):
+            time.sleep(1.5)
+            if re.search(r"https://\S+", tmux_pane("login") or ""):
+                break
+        audit(session["user"], "Iniciar conexión de la cuenta de Claude", client_ip())
+    except Exception as e:
+        flash(f"No se pudo iniciar la conexión: {e}", "error")
+    return redirect(url_for("panel.claude_page"))
+
+
+@bp.route("/claude/codigo", methods=["POST"])
+def claude_code():
+    code = request.form.get("code", "").strip()
+    if not CODE_RE.match(code):
+        flash("El código no tiene el formato esperado. Cópialo completo de la página de Claude.", "error")
+        return redirect(url_for("panel.claude_page"))
+    try:
+        if tmux_pane("login") is None:
+            flash("La conexión ha caducado. Pulsa de nuevo «Conectar cuenta».", "error")
+            return redirect(url_for("panel.claude_page"))
+        cexec(["tmux", "send-keys", "-t", "login", "-l", code])
+        cexec(["tmux", "send-keys", "-t", "login", "Enter"])
+        logged = False
+        for _ in range(12):
+            time.sleep(2)
+            logged = claude_info()["logged"]
+            if logged:
+                break
+        cexec(["tmux", "kill-session", "-t", "login"])
+        audit(session["user"], "Conectar cuenta de Claude", client_ip(), "correcto" if logged else "error")
+        if logged:
+            flash("Cuenta de Claude conectada. Remote Control arranca en menos de un minuto.", "ok")
+        else:
+            flash("Claude no ha aceptado el código. Pulsa «Conectar cuenta» y repite el proceso.", "error")
+    except Exception as e:
+        flash(f"No se pudo completar la conexión: {e}", "error")
+    return redirect(url_for("panel.claude_page"))
+
+
+@bp.route("/claude/salir", methods=["POST"])
+def claude_logout():
+    try:
+        cexec(["claude", "auth", "logout"])
+        docker("POST", f"/containers/{CLAUDE_CONTAINER}/restart", timeout=60)
+        audit(session["user"], "Desconectar cuenta de Claude", client_ip(), "correcto")
+        flash("Cuenta de Claude desconectada del entorno.", "ok")
+    except Exception as e:
+        flash(f"No se pudo desconectar: {e}", "error")
+    return redirect(url_for("panel.claude_page"))
 
 
 @bp.route("/actividad")

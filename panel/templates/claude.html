@@ -1,0 +1,55 @@
+{% extends "base.html" %}{% block title %}Claude{% endblock %}
+{% block body %}
+<h1>Claude</h1>
+<p class="lead">La cuenta de Claude con la que se desarrolla en este entorno. Su uso cuenta contra la suscripción de esa cuenta.</p>
+{% if not c.ok %}
+<div class="flash error">No se puede consultar el contenedor de Claude: {{ c.error }}</div>
+{% elif c.logged %}
+<div class="grid">
+  <div class="card">
+    <h2>Cuenta</h2>
+    <p><span class="tag ok">Conectada</span></p>
+    <p>{{ c.email or c.org }}{% if c.plan %} <span class="tag">{{ c.plan }}</span>{% endif %}</p>
+    <form method="post" action="{{ url_for('panel.claude_logout') }}" onsubmit="return confirm('¿Desconectar la cuenta de Claude de este entorno?')">
+      <input type="hidden" name="_csrf" value="{{ csrf }}"><button class="danger">Desconectar cuenta</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2>Sesión remota</h2>
+    {% if c.rc == 'conectado' %}
+    <p><span class="tag ok">Conectada</span></p>
+    <p class="small muted">Abre la sesión desde la pestaña Code de la aplicación de Claude, con esa misma cuenta.</p>
+    <a class="btn" href="{{ c.rc_url }}" target="_blank" rel="noopener">Abrir en Claude</a>
+    {% else %}
+    <p><span class="tag warn">{{ c.rc }}</span></p>
+    <p class="small muted">Tarda hasta un minuto en arrancar tras conectar la cuenta. <a href="{{ url_for('panel.claude_page') }}">Actualizar</a></p>
+    {% endif %}
+  </div>
+</div>
+{% elif c.login_url %}
+<div class="card">
+  <h2>Conectar cuenta: dos pasos</h2>
+  <p><strong>1.</strong> Abre este enlace, inicia sesión con tu cuenta de Claude y autoriza el acceso.</p>
+  <p><a class="btn" href="{{ c.login_url }}" target="_blank" rel="noopener">Abrir la página de autorización</a></p>
+  <p><strong>2.</strong> Claude te mostrará un código. Pégalo aquí.</p>
+  <form method="post" action="{{ url_for('panel.claude_code') }}" class="row">
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <input type="text" name="code" placeholder="Código de autorización" required autocomplete="off" style="flex:1">
+    <button class="primary">Conectar</button>
+  </form>
+  <p class="small muted">El enlace caduca a los pocos minutos. Si falla, vuelve a empezar.</p>
+  <form method="post" action="{{ url_for('panel.claude_login') }}">
+    <input type="hidden" name="_csrf" value="{{ csrf }}"><button>Generar un enlace nuevo</button>
+  </form>
+</div>
+{% else %}
+<div class="card">
+  <h2>Cuenta</h2>
+  <p><span class="tag">Sin conectar</span></p>
+  <p class="small muted">Usa una cuenta con suscripción de Claude. Evita cuentas que tengan conectores con acceso a otros sistemas (correo, almacenamiento, servidores).</p>
+  <form method="post" action="{{ url_for('panel.claude_login') }}">
+    <input type="hidden" name="_csrf" value="{{ csrf }}"><button class="primary">Conectar cuenta</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}
