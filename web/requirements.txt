@@ -20,3 +20,8 @@ google-auth>=2.0.0
 google-auth-oauthlib>=0.4.0
 google-api-python-client>=2.0.0
 openupgradelib
+# base_rest (API de los módulos React, como datoo_obra_app)
+cerberus
+pyquerystring
+parse-accept-language
+apispec
