@@ -17,7 +17,7 @@ while true; do
   fi
   # Codex (ChatGPT): su control remoto es un servicio en segundo plano.
   if ! pgrep -f "app-server --remote-control" >/dev/null 2>&1; then
-    if codex login status 2>/dev/null | grep -q "Logged in"; then
+    if codex login status 2>&1 | grep -q "Logged in"; then
       codex remote-control start >/dev/null 2>&1 && echo "Control remoto de Codex arrancado."
     fi
   fi
