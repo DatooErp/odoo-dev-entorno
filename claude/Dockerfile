@@ -4,7 +4,7 @@ FROM node:22-bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
       git openssh-client tmux ca-certificates curl ripgrep python3 less procps \
     && rm -rf /var/lib/apt/lists/*
-RUN npm install -g @anthropic-ai/claude-code
+RUN npm install -g @anthropic-ai/claude-code @openai/codex
 RUN useradd -m -u 10002 -s /bin/bash dev
 COPY --chmod=755 entrypoint.sh /usr/local/bin/entrypoint.sh
 USER dev
