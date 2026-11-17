@@ -34,3 +34,16 @@ sin tareas programadas y sin envíos al SII, Veri*Factu ni TicketBAI.
 
 Pendiente (fase 2): solicitud de paso a producción, revisión y merge con
 inicio de sesión de GitHub.
+
+## Claude Code
+
+El contenedor `claude` arranca Remote Control en cuanto hay una sesión
+iniciada. La primera vez:
+
+1. `docker exec -it odoo-dev-claude claude auth login` y seguir el enlace.
+2. `docker attach odoo-dev-claude` para aceptar las preguntas iniciales de
+   Remote Control (confiar en la carpeta y activarlo). Salir con Ctrl-P Ctrl-Q.
+
+La cuenta de Claude del entorno debe ser la del cliente, o una dedicada, **sin
+conectores con acceso a otros sistemas**: una sesión iniciada con esa cuenta
+puede usar sus conectores aunque el contenedor esté aislado.

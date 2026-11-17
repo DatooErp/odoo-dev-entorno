@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 RUN npm install -g @anthropic-ai/claude-code
 RUN useradd -m -u 10002 -s /bin/bash dev
+COPY --chmod=755 entrypoint.sh /usr/local/bin/entrypoint.sh
 USER dev
 WORKDIR /workspace/datoov16
-CMD ["sleep", "infinity"]
+CMD ["entrypoint.sh"]

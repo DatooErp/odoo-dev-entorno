@@ -96,11 +96,18 @@ services:
     container_name: odoo-dev-claude
     restart: unless-stopped
     init: true
+    tty: true
+    stdin_open: true
     mem_limit: 2g
     cap_drop:
       - ALL
     security_opt:
       - no-new-privileges
+    environment:
+      - ENV_NAME=${ENV_NAME:-Entorno de desarrollo}
+      # No cargar los conectores de la cuenta de Claude (correo, Drive, etc.).
+      # Es una comodidad, no una barrera: usar una cuenta sin conectores sensibles.
+      - ENABLE_CLAUDEAI_MCP_SERVERS=false
     volumes:
       - ./datoov16:/workspace/datoov16
       - ./modulos_github16:/workspace/modulos_github16:ro
