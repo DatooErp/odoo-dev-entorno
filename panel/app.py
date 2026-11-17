@@ -374,6 +374,10 @@ def claude_info():
 
 INSTRUCCIONES = """# Entorno de desarrollo compartido
 
+El código está en `/workspace/datoov16`. Trabaja siempre en esa carpeta,
+aunque la conversación empiece en otra: algunas aplicaciones abren cada
+conversación en una carpeta nueva y vacía. No crees proyectos fuera de ella.
+
 Trabajas en el entorno de desarrollo de una empresa. La carpeta de código, la
 rama y la base de datos son compartidas con otros usuarios de la misma
 empresa, que pueden estar trabajando a la vez.
@@ -426,6 +430,13 @@ El Odoo de desarrollo está en http://web:8069.
 """
 
 
+# Codex abre cada conversación remota en una carpeta vacía y su aislamiento
+# interno no funciona dentro de un contenedor: aquí el aislamiento lo dan el
+# contenedor y el usuario del puesto.
+CODEX_CONFIG_TOP = '# entorno-datoo\nsandbox_mode = "danger-full-access"\n'
+CODEX_CONFIG_END = '\n[projects."/workspace/datoov16"]\ntrust_level = "trusted"\n'
+
+
 def preparar_puesto(user):
     """Deja el puesto listo: firma de git, nombre de sesión e instrucciones."""
     token = secrets.token_urlsafe(32)
@@ -433,10 +444,13 @@ def preparar_puesto(user):
               '&& (umask 077; printf %s "$P_TOKEN" > ~/.entorno-token) '
               '&& printf %s "$P_SESSION" > ~/.nombre-sesion '
               '&& mkdir -p ~/.claude ~/.codex '
-              '&& printf %s "$P_TEXT" > ~/.claude/CLAUDE.md && printf %s "$P_TEXT" > ~/.codex/AGENTS.md')
+              '&& printf %s "$P_TEXT" > ~/.claude/CLAUDE.md && printf %s "$P_TEXT" > ~/.codex/AGENTS.md '
+              '&& f=~/.codex/config.toml && { grep -q entorno-datoo $f 2>/dev/null || '
+              '{ { printf %s "$P_CX_TOP"; cat $f 2>/dev/null; printf %s "$P_CX_END"; } > $f.new && mv $f.new $f; }; }')
     code, out = cexec(["sh", "-c", script], u=puesto(user), extra_env=[
         f"P_NAME={user['name']}", f"P_EMAIL={user['email']}",
-        f"P_SESSION={ENV_NAME} · {user['name']}", f"P_TEXT={INSTRUCCIONES}", f"P_TOKEN={token}"])
+        f"P_SESSION={ENV_NAME} · {user['name']}", f"P_TEXT={INSTRUCCIONES}", f"P_TOKEN={token}",
+        f"P_CX_TOP={CODEX_CONFIG_TOP}", f"P_CX_END={CODEX_CONFIG_END}"])
     if code != 0:
         raise RuntimeError(out.strip()[-200:])
     sql("UPDATE users SET api_hash=? WHERE id=?", (hashlib.sha256(token.encode()).hexdigest(), user["id"]))
