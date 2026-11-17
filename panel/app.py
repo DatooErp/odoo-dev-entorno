@@ -1451,11 +1451,13 @@ def terminal_ws(ws, tool):
     """Puente entre la ventana del navegador y el terminal del puesto del usuario."""
     origin = request.headers.get("Origin", "")
     if tool not in TOOLS or not TERMINAL_SECRET or origin.split("://", 1)[-1] != request.host:
+        app.logger.warning("terminal rechazado: origen %r, host %r", origin, request.host)
         return  # solo desde las páginas del propio panel
     try:
         user = puesto()
         up = WSClient.connect(TERMINAL_URL)
-    except Exception:
+    except Exception as e:
+        app.logger.warning("terminal: no se pudo abrir el puente: %r", e)
         return
     up.send(json.dumps(dict(secret=TERMINAL_SECRET, user=user, tool=tool, cols=120, rows=32)))
     audit(session["user"], f"Abrir terminal de {TOOLS[tool]}", client_ip())
@@ -1475,8 +1477,8 @@ def terminal_ws(ws, tool):
     try:
         while True:
             up.send(ws.receive())
-    except Exception:
-        pass
+    except Exception as e:
+        app.logger.info("terminal cerrado: %r", e)
     finally:
         try:
             up.close()

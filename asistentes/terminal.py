@@ -103,10 +103,8 @@ async def handler(ws):
         except Exception:
             pass
         task.cancel()
-        try:  # cierra la ventana; la sesión de tmux sigue viva para reconectar
-            os.kill(pid, signal.SIGHUP)
-        except ProcessLookupError:
-            pass
+        # Al cerrar el terminal, la ventana de tmux recibe el aviso de corte y
+        # termina; la sesión de tmux sigue viva para reconectar.
         os.close(fd)
 
 
