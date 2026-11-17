@@ -1,0 +1,46 @@
+{% extends "base.html" %}{% block title %}Copias{% endblock %}
+{% macro tabla(items, origin) %}
+<table>
+  <tr><th>Copia</th><th>Fecha</th><th>Tamaño</th><th></th></tr>
+  {% for b in items %}
+  <tr>
+    <td class="mono small">{{ b.rel }}</td><td class="small">{{ b.mtime }}</td><td class="small">{{ b.size }}</td>
+    <td class="num">
+      <form method="post" action="{{ url_for('panel.backup_restore') }}" class="row" style="justify-content:flex-end">
+        <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="origin" value="{{ origin }}"><input type="hidden" name="rel" value="{{ b.rel }}">
+        <input type="text" name="name" placeholder="restaurar como…" pattern="[a-z0-9][a-z0-9_]{1,49}" required style="width:170px">
+        <button class="primary">Restaurar</button>
+        {% if origin == 'archivo' %}<a class="btn" href="{{ url_for('panel.backup_download', rel=b.rel) }}">Descargar</a>{% endif %}
+      </form>
+      {% if origin == 'archivo' %}
+      <form method="post" action="{{ url_for('panel.backup_delete') }}" style="margin-top:6px" onsubmit="return confirm('¿Eliminar la copia {{ b.rel }}?')">
+        <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="rel" value="{{ b.rel }}"><button class="danger">Eliminar</button>
+      </form>{% endif %}
+    </td>
+  </tr>
+  {% else %}<tr><td colspan="4" class="muted">No hay copias.</td></tr>{% endfor %}
+</table>
+{% endmacro %}
+{% block body %}
+<h1>Copias de seguridad</h1>
+<p class="lead">Al restaurar, la base de datos se crea neutralizada: sin correo, sin tareas programadas y sin envíos al SII.</p>
+<div class="card">
+  <h2>Archivo del entorno</h2>
+  {{ tabla(archive, 'archivo') }}
+</div>
+<div class="card">
+  <h2>Subir una copia</h2>
+  <form method="post" action="{{ url_for('panel.backup_upload') }}" enctype="multipart/form-data" class="row">
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <input type="file" name="file" accept=".zip,.dump" required>
+    <button class="primary">Subir al archivo</button>
+    <span class="small muted">Formato .zip de Odoo o .dump de PostgreSQL. Máximo 100 MB por subida.</span>
+  </form>
+</div>
+{% if has_source %}
+<div class="card">
+  <h2>Copias de producción <span class="tag">Solo Datoo</span></h2>
+  {{ tabla(source, 'origen') }}
+</div>
+{% endif %}
+{% endblock %}

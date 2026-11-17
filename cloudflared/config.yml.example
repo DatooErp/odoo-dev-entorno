@@ -1,0 +1,19 @@
+tunnel: ID-DEL-TUNEL
+credentials-file: /home/nonroot/.cloudflared/ID-DEL-TUNEL.json
+ingress:
+  # Panel, en su propio nombre para no compartir origen con Odoo.
+  - hostname: paneldesarrollo.example.com
+    service: http://panel:8000
+  - hostname: desarrollo.example.com
+    path: ^/websocket
+    service: http://web:8072
+  # Gestor de bases de datos: desde fuera solo se permite elegir base de datos.
+  - hostname: desarrollo.example.com
+    path: ^/web/database/selector
+    service: http://web:8069
+  - hostname: desarrollo.example.com
+    path: ^/web/database
+    service: http_status:403
+  - hostname: desarrollo.example.com
+    service: http://web:8069
+  - service: http_status:404

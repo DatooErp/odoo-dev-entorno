@@ -1,0 +1,12 @@
+# Lo que solo existe en cada servidor: secretos, credenciales y código clonado.
+.env
+CREDENCIALES.txt
+conf/odoo.conf
+cloudflared/*.json
+cloudflared/*.pem
+cloudflared/config.yml
+ssh/
+datoov16/
+modulos_github16/
+__pycache__/
+*.log

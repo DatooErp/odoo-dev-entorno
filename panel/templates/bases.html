@@ -1,0 +1,60 @@
+{% extends "base.html" %}{% block title %}Bases de datos{% endblock %}
+{% block body %}
+<h1>Bases de datos</h1>
+<p class="lead">Las copias y los duplicados se crean siempre neutralizados: sin correo, sin tareas programadas y sin envíos al SII.</p>
+<div class="card">
+  <h2>Crear una base de datos vacía</h2>
+  <form method="post" action="{{ url_for('panel.db_create') }}" class="row">
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <input type="text" name="name" placeholder="nombre_de_la_base" pattern="[a-z0-9][a-z0-9_]{1,49}" required>
+    <button class="primary">Crear</button>
+    <span class="small muted">Solo el módulo base, en español. La contraseña de admin se muestra al terminar.</span>
+  </form>
+</div>
+{% for d in dbs %}
+<div class="card">
+  <div class="row" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+    <h2 style="margin:0"><span class="mono">{{ d.name }}</span></h2>
+    <span class="small muted">{{ d.modules if d.modules is not none else '—' }} módulos · {{ d.size }}
+      {% if d.neutral %}<span class="tag ok">Neutralizada</span>{% elif d.neutral is not none %}<span class="tag">Sin neutralizar</span>{% endif %}</span>
+  </div>
+  <div style="margin-top:12px">
+  <details>
+    <summary>Instalar o actualizar módulos</summary>
+    <form method="post" action="{{ url_for('panel.db_modules') }}" class="row">
+      <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="name" value="{{ d.name }}">
+      <select name="mode"><option value="actualizar">Actualizar</option><option value="instalar">Instalar</option></select>
+      <input type="text" name="modules" placeholder="modulo_uno,modulo_dos" required style="flex:1">
+      <label><input type="checkbox" name="restart" checked> Reiniciar Odoo al terminar</label>
+      <button class="primary">Ejecutar</button>
+    </form>
+  </details>
+  <details>
+    <summary>Archivar una copia de seguridad</summary>
+    <form method="post" action="{{ url_for('panel.db_backup') }}" class="row">
+      <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="name" value="{{ d.name }}">
+      <button class="primary">Archivar copia</button><span class="small muted">Incluye los ficheros adjuntos. Queda en la pestaña Copias.</span>
+    </form>
+  </details>
+  <details>
+    <summary>Duplicar</summary>
+    <form method="post" action="{{ url_for('panel.db_duplicate') }}" class="row">
+      <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="name" value="{{ d.name }}">
+      <input type="text" name="new_name" placeholder="nombre_de_la_copia" pattern="[a-z0-9][a-z0-9_]{1,49}" required>
+      <button class="primary">Duplicar</button>
+    </form>
+  </details>
+  <details>
+    <summary>Eliminar</summary>
+    <form method="post" action="{{ url_for('panel.db_drop') }}" class="row">
+      <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="name" value="{{ d.name }}">
+      <input type="text" name="confirm" placeholder="Escribe {{ d.name }} para confirmar" required autocomplete="off" style="flex:1">
+      <button class="danger">Eliminar definitivamente</button>
+    </form>
+  </details>
+  </div>
+</div>
+{% else %}
+<div class="card muted">No hay bases de datos en el entorno.</div>
+{% endfor %}
+{% endblock %}

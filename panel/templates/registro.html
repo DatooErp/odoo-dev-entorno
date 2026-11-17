@@ -1,0 +1,7 @@
+{% extends "base.html" %}{% block title %}Registro{% endblock %}
+{% block body %}
+<h1>Registro de Odoo</h1>
+<p class="lead">Últimas líneas del contenedor de Odoo. <a href="{{ url_for('panel.logs', lineas=300) }}">300</a> · <a href="{{ url_for('panel.logs', lineas=1500) }}">1500</a> · <a href="{{ url_for('panel.logs') }}">Actualizar</a></p>
+<pre class="log" id="log">{{ text }}</pre>
+<script>var l=document.getElementById('log');l.scrollTop=l.scrollHeight;</script>
+{% endblock %}

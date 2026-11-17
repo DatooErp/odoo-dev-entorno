@@ -1,0 +1,45 @@
+{% extends "base.html" %}{% block title %}Entorno{% endblock %}
+{% block body %}
+<h1>Entorno</h1>
+<p class="lead">Estado del Odoo de desarrollo. Nada de lo que se hace aquí afecta a producción.</p>
+<div class="grid">
+  <div class="card">
+    <h2>Odoo</h2>
+    <p>{% if state.ok %}<span class="tag ok">En marcha</span>{% else %}<span class="tag err">{{ state.status }}</span>{% endif %}
+       {% if state.started %}<span class="muted small">desde {{ state.started }} UTC</span>{% endif %}</p>
+    {% if state.error %}<p class="small muted">{{ state.error }}</p>{% endif %}
+    <form method="post" action="{{ url_for('panel.restart') }}" class="row" onsubmit="return confirm('¿Reiniciar Odoo? Se cortan las sesiones en curso.')">
+      <input type="hidden" name="_csrf" value="{{ csrf }}">
+      <button class="primary">Reiniciar Odoo</button>
+      <a class="btn" href="{{ url_for('panel.logs') }}">Ver registro</a>
+      {% if odoo_url %}<a class="btn" href="{{ odoo_url }}" target="_blank" rel="noopener">Abrir Odoo</a>{% endif %}
+    </form>
+  </div>
+  <div class="card">
+    <h2>Código</h2>
+    <table>
+      {% for r in repos %}
+      <tr><td><strong>{{ r.name }}</strong><br><span class="small muted">{{ r.subject }}</span></td>
+          <td class="num"><span class="tag">{{ r.branch }}</span><br><span class="mono small">{{ r.sha }}</span> <span class="small muted">{{ r.date }}</span></td></tr>
+      {% else %}<tr><td class="muted">No hay repositorios montados.</td></tr>{% endfor %}
+    </table>
+  </div>
+</div>
+<div class="card">
+  <h2>Bases de datos</h2>
+  <table>
+    <tr><th>Nombre</th><th>Módulos</th><th>Tamaño</th><th></th></tr>
+    {% for d in dbs %}
+    <tr><td class="mono">{{ d.name }}</td><td>{{ d.modules if d.modules is not none else '—' }}</td><td>{{ d.size }}</td>
+        <td class="num">{% if d.neutral %}<span class="tag ok">Neutralizada</span>{% elif d.neutral is not none %}<span class="tag">Sin neutralizar</span>{% endif %}</td></tr>
+    {% else %}<tr><td colspan="4" class="muted">No hay bases de datos.</td></tr>{% endfor %}
+  </table>
+</div>
+{% if jobs %}
+<div class="card">
+  <h2>Últimas operaciones</h2>
+  <table>{% for j in jobs %}<tr><td><a href="{{ url_for('panel.job_view', jid=j.id) }}">{{ j.title }}</a></td><td class="muted small">{{ j.started }}</td>
+  <td class="num"><span class="tag {{ 'ok' if j.status=='correcto' else 'err' if j.status=='error' else 'warn' }}">{{ j.status }}</span></td></tr>{% endfor %}</table>
+</div>
+{% endif %}
+{% endblock %}

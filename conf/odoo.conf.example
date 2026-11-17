@@ -1,0 +1,29 @@
+[options]
+addons_path = /mnt/addons/datoov16,/mnt/addons/modulos_github16
+admin_passwd = CAMBIAR
+data_dir = /var/lib/odoo
+db_host = db
+db_port = 5432
+db_user = odoo
+db_password = CAMBIAR
+db_template = template0
+db_maxconn = 32
+dbfilter =
+; El panel usa el gestor de bases de datos por la red interna.
+; Desde fuera lo bloquea el túnel (cloudflared/config.yml).
+list_db = True
+http_port = 8069
+gevent_port = 8072
+proxy_mode = True
+server_wide_modules = base,web,dbfilter_from_header
+unaccent = True
+without_demo = all
+workers = 2
+max_cron_threads = 1
+limit_request = 8192
+limit_memory_soft = 671088640
+limit_memory_hard = 805306368
+; Límites amplios: restaurar una copia grande tarda más que una petición normal.
+limit_time_cpu = 1800
+limit_time_real = 3600
+log_level = info

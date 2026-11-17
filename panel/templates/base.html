@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>{% block title %}Panel{% endblock %} · {{ env_name }}</title>
+<style>
+:root{--bg:#f6f5f2;--card:#fff;--ink:#1f2328;--mute:#667085;--line:#e4e2dd;--accent:#714b67;--ok:#1a7f4b;--err:#b42318;--warn:#b54708}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+header{background:var(--accent);color:#fff;padding:0 24px;display:flex;align-items:center;gap:24px;flex-wrap:wrap}
+header .brand{font-weight:600;padding:14px 0}
+header nav{display:flex;gap:4px;flex:1;flex-wrap:wrap}
+header nav a{color:#fff;opacity:.8;text-decoration:none;padding:14px 12px;border-bottom:3px solid transparent}
+header nav a.on,header nav a:hover{opacity:1;border-bottom-color:#fff}
+header .who{font-size:13px;display:flex;align-items:center;gap:10px}
+header .who button{background:transparent;border:1px solid rgba(255,255,255,.5);color:#fff}
+main{max-width:1080px;margin:24px auto;padding:0 24px}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;margin:0 0 12px}
+p.lead{color:var(--mute);margin:0 0 20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin-bottom:18px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);font-weight:600}
+th,td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+tr:last-child td{border-bottom:0}
+td.num{text-align:right;white-space:nowrap}
+code,.mono{font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+.tag{display:inline-block;font-size:12px;padding:1px 8px;border-radius:99px;border:1px solid var(--line);color:var(--mute)}
+.tag.ok{color:var(--ok);border-color:#b7e1c8;background:#effaf3}
+.tag.err{color:var(--err);border-color:#f3c0ba;background:#fef3f2}
+.tag.warn{color:var(--warn);border-color:#f5d3a7;background:#fffaeb}
+button,.btn{font:inherit;font-size:14px;padding:6px 12px;border-radius:7px;border:1px solid var(--line);background:#fff;color:var(--ink);cursor:pointer;text-decoration:none;display:inline-block}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.danger{color:var(--err);border-color:#f3c0ba}
+button:hover,.btn:hover{filter:brightness(.96)}
+input[type=text],input[type=password],select{font:inherit;padding:6px 9px;border:1px solid #cfccc5;border-radius:7px;min-width:0}
+form.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+label{font-size:13px;color:var(--mute)}
+details{border-top:1px solid var(--line);padding:8px 0}
+details summary{cursor:pointer;color:var(--accent);font-size:14px}
+details form{margin:10px 0 4px}
+.flash{padding:10px 14px;border-radius:8px;margin-bottom:14px;border:1px solid}
+.flash.error{background:#fef3f2;border-color:#f3c0ba;color:var(--err)}
+.flash.ok{background:#effaf3;border-color:#b7e1c8;color:var(--ok)}
+pre.log{background:#16181d;color:#d7dae0;padding:14px;border-radius:8px;overflow:auto;max-height:65vh;font:12.5px/1.45 ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-word;margin:0}
+.muted{color:var(--mute)}.small{font-size:13px}
+.note{background:#fffaeb;border:1px solid #f5d3a7;border-radius:8px;padding:10px 14px;margin:12px 0}
+.login{max-width:360px;margin:9vh auto}
+.login input,.login select,.login button{width:100%;margin-top:4px;margin-bottom:12px}
+</style>
+</head>
+<body>
+{% if role %}
+<header>
+  <div class="brand">{{ env_name }}</div>
+  <nav>
+    {% for ep, label in [('panel.home','Entorno'),('panel.bases','Bases de datos'),('panel.backups','Copias'),('panel.activity','Actividad')] %}
+    <a href="{{ url_for(ep) }}" class="{{ 'on' if request.endpoint == ep }}">{{ label }}</a>
+    {% endfor %}
+  </nav>
+  <div class="who">
+    {% if busy %}<span class="tag warn">Operación en curso</span>{% endif %}
+    <span>{{ role }}</span>
+    <form method="post" action="{{ url_for('panel.logout') }}"><input type="hidden" name="_csrf" value="{{ csrf }}"><button>Salir</button></form>
+  </div>
+</header>
+{% endif %}
+<main>
+{% for cat, msg in get_flashed_messages(with_categories=true) %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}
+{% block body %}{% endblock %}
+</main>
+</body>
+</html>

@@ -1,0 +1,130 @@
+# Entorno de desarrollo Odoo, independiente de cualquier otro compose del
+# servidor: imagen, Postgres, ficheros y código propios. No publica puertos
+# en el host; se accede por el túnel de Cloudflare.
+name: odoo-dev
+
+services:
+  web:
+    build: ./web
+    image: odoo-dev-web:16.0
+    container_name: odoo-dev-web
+    restart: unless-stopped
+    user: odoo
+    entrypoint: ""
+    command: ["odoo"]
+    depends_on:
+      - db
+    mem_limit: 2g
+    volumes:
+      - ./conf:/etc/odoo:ro
+      - odoo-dev-data:/var/lib/odoo
+      - ./datoov16:/mnt/addons/datoov16:ro
+      - ./modulos_github16:/mnt/addons/modulos_github16:ro
+
+  db:
+    image: postgres:13.0-alpine
+    container_name: odoo-dev-db
+    restart: unless-stopped
+    mem_limit: 1g
+    shm_size: 256m
+    environment:
+      - POSTGRES_DB=postgres
+      - POSTGRES_USER=odoo
+      - POSTGRES_PASSWORD=${PG_PASSWORD}
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - odoo-dev-pgdata:/var/lib/postgresql/data/pgdata
+
+  # Panel de control. Guarda los secretos del entorno, por eso va en su
+  # propio contenedor y no en el de Odoo, donde corre código del cliente.
+  panel:
+    build: ./panel
+    image: odoo-dev-panel
+    container_name: odoo-dev-panel
+    restart: unless-stopped
+    mem_limit: 512m
+    depends_on:
+      - web
+      - dockerproxy
+    environment:
+      - PANEL_PREFIX=${PANEL_PREFIX:-}
+      - PANEL_SECRET_KEY=${PANEL_SECRET_KEY}
+      - PANEL_CLIENTE_PASSWORD=${PANEL_CLIENTE_PASSWORD}
+      - PANEL_DATOO_PASSWORD=${PANEL_DATOO_PASSWORD}
+      - ODOO_MASTER_PASSWORD=${ODOO_MASTER_PASSWORD}
+      - PGPASSWORD=${PG_PASSWORD}
+      - PUBLIC_URL=${PUBLIC_URL:-}
+      - ENV_NAME=${ENV_NAME:-Entorno de desarrollo}
+    volumes:
+      - odoo-dev-backups:/backups
+      - odoo-dev-panel-data:/data
+      - ./datoov16:/repos/datoov16:ro
+      - ./modulos_github16:/repos/modulos_github16:ro
+    networks:
+      - default
+      - control
+
+  # Único acceso a Docker del entorno: solo deja reiniciar, leer el registro
+  # y ejecutar comandos en el contenedor odoo-dev-web. Nada más del servidor.
+  dockerproxy:
+    image: wollomatic/socket-proxy:1
+    container_name: odoo-dev-dockerproxy
+    restart: unless-stopped
+    user: "65534:${DOCKER_GID}"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges
+    mem_limit: 64m
+    command:
+      - -loglevel=info
+      - -listenip=0.0.0.0
+      - -allowfrom=panel
+      - -allowGET=^/v1\.[0-9]+/(containers/odoo-dev-web/(json|logs)|exec/[a-f0-9]+/json)$
+      - -allowPOST=^/v1\.[0-9]+/(containers/odoo-dev-web/(restart|exec)|exec/[a-f0-9]+/start)$
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - control
+
+  # Claude Code en sesión remota. Escribe solo en ./datoov16 (su rama de
+  # desarrollo); modulos_github16 va en solo lectura.
+  claude:
+    build: ./claude
+    image: odoo-dev-claude
+    container_name: odoo-dev-claude
+    restart: unless-stopped
+    init: true
+    mem_limit: 2g
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges
+    volumes:
+      - ./datoov16:/workspace/datoov16
+      - ./modulos_github16:/workspace/modulos_github16:ro
+      - odoo-dev-claude-home:/home/dev
+
+  # Túnel de Cloudflare. Las rutas están en ./cloudflared/config.yml.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: odoo-dev-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --config /home/nonroot/.cloudflared/config.yml run
+    volumes:
+      - ./cloudflared:/home/nonroot/.cloudflared:ro
+    depends_on:
+      - web
+    mem_limit: 256m
+
+networks:
+  control:
+    internal: true
+
+volumes:
+  odoo-dev-data:
+  odoo-dev-pgdata:
+  odoo-dev-backups:
+  odoo-dev-panel-data:
+  odoo-dev-claude-home:

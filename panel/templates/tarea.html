@@ -1,0 +1,24 @@
+{% extends "base.html" %}{% block title %}{{ job.title }}{% endblock %}
+{% block body %}
+<h1>{{ job.title }}</h1>
+<p class="lead">Iniciada {{ job.started }} por {{ job.user }} ·
+  <span id="st" class="tag {{ 'ok' if job.status=='correcto' else 'err' if job.status=='error' else 'warn' }}">{{ job.status }}</span></p>
+<div id="note" class="note" {% if not job.note %}hidden{% endif %}>{{ job.note }}</div>
+<pre class="log" id="log">{{ job.lines|join('\n') }}</pre>
+<p><a class="btn" href="{{ url_for('panel.bases') }}">Volver a bases de datos</a></p>
+<script>
+(function(){
+  var st=document.getElementById('st'),log=document.getElementById('log'),note=document.getElementById('note');
+  function tick(){
+    fetch('{{ url_for("panel.job_json", jid=job.id) }}',{credentials:'same-origin'}).then(function(r){return r.json()}).then(function(j){
+      var bottom=log.scrollTop+log.clientHeight>=log.scrollHeight-30;
+      log.textContent=j.log; if(bottom)log.scrollTop=log.scrollHeight;
+      st.textContent=j.status; st.className='tag '+(j.status=='correcto'?'ok':j.status=='error'?'err':'warn');
+      if(j.note){note.textContent=j.note;note.hidden=false}
+      if(j.status=='en curso')setTimeout(tick,1500);
+    }).catch(function(){setTimeout(tick,4000)});
+  }
+  if(st.textContent.trim()=='en curso')tick();
+})();
+</script>
+{% endblock %}
