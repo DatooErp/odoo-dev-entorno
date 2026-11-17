@@ -632,11 +632,15 @@ def fetch_source(job):
     raise RuntimeError("El origen de producción no está configurado en este entorno. Avisa a Datoo.")
 
 
-def restore_from_production(job):
-    """Sustituye la base de datos de la empresa por una copia de producción."""
+def restore_from_production(job, path=None):
+    """Sustituye la base de datos de la empresa por una copia de producción.
+
+    Sin path, pide la copia al servidor de producción; con path, usa ese
+    fichero (un zip de Odoo o un dump de PostgreSQL que ha aportado Datoo).
+    """
     if not DEV_DB:
         raise RuntimeError("Este entorno no tiene definida su base de datos de desarrollo.")
-    path = fetch_source(job)
+    path = path or fetch_source(job)
     before = installed_modules(DEV_DB)
     tmp = DEV_DB + "_nueva"
     if tmp in db_names():
@@ -825,7 +829,7 @@ def bases():
         flash(f"No se puede conectar con PostgreSQL: {e}", "error")
     if not es_datoo():  # el cliente solo ve la base de datos de su empresa
         dbs = [d for d in dbs if d["name"] == DEV_DB]
-    return render_template("bases.html", dbs=dbs, has_source=bool(SOURCE_SSH and SOURCE_DB) or bool(SOURCE_DIR))
+    return render_template("bases.html", dbs=dbs, has_source=bool(SOURCE_SSH and SOURCE_DB))
 
 
 @bp.route("/produccion/restaurar", methods=["POST"])
@@ -976,6 +980,18 @@ def backup_restore():
         extra_neutralize(job, name)
 
     return job_redirect(start_job(f"Restaurar copia en {name}", run), url_for("panel.backups"))
+
+
+@bp.route("/copias/restaurar-empresa", methods=["POST"])
+@solo_datoo
+def backup_restore_company():
+    path = resolve_backup(request.form.get("origin", "archivo"), request.form.get("rel", ""))
+    if request.form.get("confirm", "").strip().lower() != "restaurar":
+        flash(f"Para sustituir {DEV_DB}, escribe «restaurar» en la casilla.", "error")
+        return redirect(url_for("panel.backups"))
+    job = start_job(f"Restaurar {DEV_DB} desde {os.path.basename(path)}",
+                    lambda job: restore_from_production(job, path))
+    return job_redirect(job, url_for("panel.backups"))
 
 
 @bp.route("/copias/subir", methods=["POST"])

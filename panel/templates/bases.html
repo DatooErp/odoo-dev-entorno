@@ -15,19 +15,20 @@
   </form>
 </div>
 {% endif %}
-{% if dev_db %}
+{% if dev_db and has_source %}
 <div class="card">
   <h2>Restaurar desde producción</h2>
-  {% if has_source %}
   <p class="small muted">Sustituye <span class="mono">{{ dev_db }}</span> por una copia reciente de producción, neutralizada, y vuelve a aplicar los cambios que hay en desarrollo. Se pierden los datos de prueba actuales y afecta a todos los usuarios del entorno.</p>
   <form method="post" action="{{ url_for('panel.production_restore') }}" class="row">
     <input type="hidden" name="_csrf" value="{{ csrf }}">
     <input type="text" name="confirm" placeholder="Escribe restaurar para confirmar" required autocomplete="off" style="width:260px">
     <button class="primary">Restaurar desde producción</button>
   </form>
-  {% else %}
-  <p class="small muted">El origen de producción todavía no está configurado en este entorno.</p>
-  {% endif %}
+</div>
+{% elif dev_db and es_datoo %}
+<div class="card">
+  <h2>Refrescar la base de datos de la empresa</h2>
+  <p class="small muted">Para sustituir <span class="mono">{{ dev_db }}</span> por una copia de producción, sube el zip o el dump en <a href="{{ url_for('panel.backups') }}">Copias</a> y pulsa «Sustituir {{ dev_db }}».</p>
 </div>
 {% endif %}
 {% for d in dbs %}

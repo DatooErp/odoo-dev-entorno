@@ -59,6 +59,7 @@ services:
       - ENV_NAME=${ENV_NAME:-Entorno de desarrollo}
       - DEV_DB=${DEV_DB:-}
       - ENV_SLUG=${ENV_SLUG:-entorno}
+      - SOURCE_DIR=/entrada
       - SOURCE_SSH=${SOURCE_SSH:-}
       - SOURCE_DB=${SOURCE_DB:-}
       - GITHUB_REPO=${GITHUB_REPO:-DatooErp/datoov16}
@@ -69,6 +70,8 @@ services:
     volumes:
       - odoo-dev-backups:/backups
       - odoo-dev-panel-data:/data
+      # Copias grandes que Datoo deja en el servidor para restaurarlas.
+      - ./entrada:/entrada:ro
       - ./datoov16:/repos/datoov16
       - ./modulos_github16:/repos/modulos_github16:ro
       # Claves que solo usa el panel: subir ramas a GitHub y pedir la copia

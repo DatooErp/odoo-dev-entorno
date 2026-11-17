@@ -7,6 +7,7 @@ cloudflared/*.pem
 cloudflared/config.yml
 ssh/
 ssh-panel/
+entrada/
 datoov16/
 modulos_github16/
 __pycache__/
