@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""Órdenes del entorno de desarrollo para los asistentes.
+
+Piden al panel que actúe sobre el Odoo de desarrollo: los asistentes no
+tienen acceso directo a Odoo ni a Docker.
+"""
+import json
+import os
+import sys
+import time
+import urllib.error
+import urllib.request
+
+PANEL = os.environ.get("PANEL_URL", "http://panel:8000").rstrip("/")
+USO = """Uso:
+  entorno actualizar <modulo[,modulo...]>   actualiza módulos y reinicia Odoo
+  entorno instalar <modulo[,modulo...]>     instala módulos y reinicia Odoo
+  entorno reiniciar                         reinicia Odoo (cambios solo de Python)
+  entorno registro [lineas]                 últimas líneas del registro de Odoo
+  entorno estado                            estado de Odoo y de la base de datos
+
+Los cambios de un frontend React no necesitan nada de esto: se compilan con
+«npm run build» en la carpeta frontend del módulo y se ven al recargar."""
+
+
+def call(path, data=None):
+    try:
+        token = open(os.path.expanduser("~/.entorno-token")).read().strip()
+    except OSError:
+        sys.exit("No hay credencial del entorno. Entra en el panel para que se genere.")
+    req = urllib.request.Request(PANEL + "/api/asistente/" + path, method="POST" if data is not None else "GET",
+                                 data=json.dumps(data).encode() if data is not None else None,
+                                 headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            return r.status, json.load(r)
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.load(e)
+        except Exception:
+            return e.code, {"error": f"El panel ha respondido {e.code}."}
+    except OSError as e:
+        sys.exit(f"No se puede contactar con el panel: {e}")
+
+
+def run(action, data):
+    for attempt in range(40):  # si hay otra operación en curso, espera su turno
+        status, body = call(action, data)
+        if status != 409:
+            break
+        if attempt == 0:
+            print("Hay otra operación en curso en el entorno. Esperando turno...", flush=True)
+        time.sleep(15)
+    if status != 200:
+        sys.exit(body.get("error", f"Error {status}"))
+    seen = 0
+    while True:
+        status, job = call(f"tarea/{body['tarea']}?desde={seen}")
+        if status != 200:
+            sys.exit(job.get("error", f"Error {status}"))
+        for line in job["lineas"]:
+            print(line, flush=True)
+        seen = job["total"]
+        if job["estado"] != "en curso":
+            print(f"Resultado: {job['estado']}")
+            sys.exit(0 if job["estado"] == "correcto" else 1)
+        time.sleep(2)
+
+
+def main():
+    args = sys.argv[1:]
+    if not args or args[0] in ("-h", "--help", "ayuda"):
+        print(USO)
+    elif args[0] in ("actualizar", "instalar") and len(args) == 2:
+        run(args[0], {"modulos": args[1]})
+    elif args[0] == "reiniciar" and len(args) == 1:
+        run("reiniciar", {})
+    elif args[0] == "registro" and len(args) <= 2:
+        status, body = call("registro?lineas=" + (args[1] if len(args) == 2 else "200"))
+        print(body.get("texto") or body.get("error", f"Error {status}"))
+        sys.exit(0 if status == 200 else 1)
+    elif args[0] == "estado" and len(args) == 1:
+        status, body = call("estado")
+        print(body.get("texto") or body.get("error", f"Error {status}"))
+        sys.exit(0 if status == 200 else 1)
+    else:
+        sys.exit(USO)
+
+
+main()

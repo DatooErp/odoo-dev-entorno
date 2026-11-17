@@ -14,6 +14,7 @@ El panel no tiene acceso a Docker ni a producción. Habla con:
 import collections
 import datetime
 import functools
+import hashlib
 import hmac
 import json
 import os
@@ -62,7 +63,10 @@ SOURCE_SSH = env("SOURCE_SSH", "")          # usuario@servidor de producción
 SOURCE_DB = env("SOURCE_DB", "")            # base de datos de producción
 GITHUB_REPO = env("GITHUB_REPO", "DatooErp/datoov16")
 GITHUB_TOKEN = env("GITHUB_TOKEN", "")
-REPO = os.path.join(REPOS_DIR, "datoov16")
+REPO = os.path.join(REPOS_DIR, "datoov16")       # carpeta compartida: solo lectura
+PANEL_REPO = os.path.join(DATA_DIR, "repo.git")  # copia del repositorio propia del panel
+GIT_URL = env("GIT_URL", f"git@github.com:{GITHUB_REPO}.git")
+SANDBOX_LOCAL = env("PANEL_SANDBOX_LOCAL") == "1"
 KEYS = env("KEYS_DIR", "/run/keys")
 REVISION_DIR = env("REVISION_DIR", "/revision")
 TERMINAL_URL = env("TERMINAL_URL", "ws://asistentes:7681/")
@@ -154,6 +158,8 @@ def init_db():
              id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, login TEXT NOT NULL,
              title TEXT NOT NULL, description TEXT, commits TEXT NOT NULL, branch TEXT,
              status TEXT NOT NULL, pr_url TEXT, note TEXT, created TEXT)""")
+    if "api_hash" not in {r["name"] for r in sql("PRAGMA table_info(users)")}:
+        sql("ALTER TABLE users ADD COLUMN api_hash TEXT")
     cols = {r["name"] for r in sql("PRAGMA table_info(solicitudes)")}
     for col in ("report", "verdict", "reviewed"):
         if col not in cols:
@@ -199,12 +205,13 @@ class Job:
             self.lines.append(line)
 
 
-def start_job(title, fn):
+def start_job(title, fn, user=None):
     """Lanza fn(job) en segundo plano. Solo una operación a la vez."""
     if not BUSY.acquire(blocking=False):
-        flash("Hay otra operación en curso. Espera a que termine.", "error")
+        if not user:
+            flash("Hay otra operación en curso. Espera a que termine.", "error")
         return None
-    job = Job(title, session["user"])
+    job = Job(title, user or session["user"])
     JOBS[job.id] = job
     while len(JOBS) > 40:
         JOBS.popitem(last=False)
@@ -371,38 +378,74 @@ Trabajas en el entorno de desarrollo de una empresa. La carpeta de código, la
 rama y la base de datos son compartidas con otros usuarios de la misma
 empresa, que pueden estar trabajando a la vez.
 
+## Deja siempre el cambio funcionando y a la vista
+
+La persona espera ver lo que pide en cuanto terminas. Después de cada cambio,
+aplícalo tú y comprueba que ha ido bien antes de darlo por hecho:
+
+- Vistas, modelos, datos, permisos o informes de un módulo:
+  `entorno actualizar <modulo>` (actualiza y reinicia Odoo).
+- Solo código Python, sin cambios de modelo: `entorno reiniciar`.
+- Módulo nuevo: `entorno instalar <modulo>`.
+- Si algo falla: `entorno registro` muestra el final del registro de Odoo.
+  Corrige y repite hasta que termine con «Resultado: correcto».
+
+`entorno` es una orden de este contenedor. No tienes acceso a Docker ni al
+servidor de Odoo: no intentes reiniciarlo de otra forma.
+
+## Módulos con frontend React
+
+Algunos módulos (por ejemplo datoo_obra_app) tienen una aplicación React en
+`<modulo>/frontend/`, que se compila a `<modulo>/static/app/` y Odoo sirve
+tal cual.
+
+- Tras cambiar el frontend, compílalo: `cd <modulo>/frontend`, `npm ci` la
+  primera vez y luego `npm run build`. Si no compila, corrígelo.
+- El resultado se ve al recargar la aplicación en el navegador (por ejemplo
+  /obra). No hace falta reiniciar Odoo. Si es una aplicación instalable,
+  puede hacer falta recargar dos veces por la caché.
+- Si el cambio toca también la API en Python, además `entorno reiniciar`; si
+  toca modelos o datos, `entorno actualizar <modulo>`.
+- No confirmes en git `static/app/` ni `node_modules/`: son ficheros
+  generados. Al solicitar el paso a producción, el panel compila de nuevo a
+  partir del código.
+
+## Git
+
 - Responde y escribe los mensajes de commit en español.
 - Trabaja siempre en la rama actual. No cambies de rama ni hagas `git push`:
   el paso a producción se solicita desde el panel.
-- Confirma tus cambios pronto y en commits pequeños. Añade solo los ficheros
-  que has tocado tú (`git add <ficheros>`), nunca `git add -A` ni `git add .`:
-  puede haber cambios sin confirmar de otros usuarios.
+- Confirma tus cambios pronto y en commits pequeños, cuando funcionen. Añade
+  solo los ficheros que has tocado tú (`git add <ficheros>`), nunca
+  `git add -A` ni `git add .`: puede haber cambios sin confirmar de otros.
 - No deshagas ni reescribas cambios de otros usuarios. Si necesitas tocar un
-  módulo que otro está modificando, avisa a la persona antes de hacerlo.
+  fichero que otro tiene a medias, avisa a la persona antes de hacerlo.
 - Solo puedes modificar `datoov16`. `modulos_github16` es de solo lectura.
-- El Odoo de desarrollo está en http://web:8069. Para aplicar cambios hay que
-  actualizar el módulo y, si cambia código Python, reiniciar Odoo: se hace
-  desde el panel, en Base de datos.
+
+El Odoo de desarrollo está en http://web:8069.
 """
 
 
 def preparar_puesto(user):
     """Deja el puesto listo: firma de git, nombre de sesión e instrucciones."""
+    token = secrets.token_urlsafe(32)
     script = ('git config --global user.name "$P_NAME" && git config --global user.email "$P_EMAIL" '
+              '&& (umask 077; printf %s "$P_TOKEN" > ~/.entorno-token) '
               '&& printf %s "$P_SESSION" > ~/.nombre-sesion '
               '&& mkdir -p ~/.claude ~/.codex '
               '&& printf %s "$P_TEXT" > ~/.claude/CLAUDE.md && printf %s "$P_TEXT" > ~/.codex/AGENTS.md')
     code, out = cexec(["sh", "-c", script], u=puesto(user), extra_env=[
         f"P_NAME={user['name']}", f"P_EMAIL={user['email']}",
-        f"P_SESSION={ENV_NAME} · {user['name']}", f"P_TEXT={INSTRUCCIONES}"])
+        f"P_SESSION={ENV_NAME} · {user['name']}", f"P_TEXT={INSTRUCCIONES}", f"P_TOKEN={token}"])
     if code != 0:
         raise RuntimeError(out.strip()[-200:])
+    sql("UPDATE users SET api_hash=? WHERE id=?", (hashlib.sha256(token.encode()).hexdigest(), user["id"]))
 
 
 def limpiar_puesto(user):
     """Desconecta las cuentas y borra las credenciales de un puesto."""
     cexec(["sh", "-c", "tmux kill-server 2>/dev/null; codex remote-control stop >/dev/null 2>&1; "
-           "rm -rf ~/.claude ~/.claude.json ~/.codex ~/.nombre-sesion ~/.gitconfig; true"],
+           "rm -rf ~/.claude ~/.claude.json ~/.codex ~/.nombre-sesion ~/.gitconfig ~/.entorno-token; true"],
           u=puesto(user), timeout=60)
 
 
@@ -427,31 +470,94 @@ def codex_info():
 
 
 # ----------------------------------------------------------------------- git
-def git(*args, cwd=None, check=True, timeout=180):
-    """git sobre el repositorio de módulos, con la clave del panel."""
-    genv = dict(os.environ, HOME=DATA_DIR, GIT_TERMINAL_PROMPT="0",
-                GIT_COMMITTER_NAME="Panel de desarrollo", GIT_COMMITTER_EMAIL="desarrollo@datoo.es",
-                GIT_SSH_COMMAND=(f"ssh -i {KEYS}/datoov16 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "
-                                 f"-o UserKnownHostsFile={KEYS}/known_hosts"))
-    r = subprocess.run(["git", "-c", "safe.directory=*", *args], cwd=cwd or REPO, env=genv,
-                       capture_output=True, text=True, timeout=timeout)
+# El panel tiene su propia copia del repositorio (PANEL_REPO). Nunca ejecuta
+# git sobre la carpeta compartida: los asistentes pueden modificar su
+# configuración y sus ganchos, y git los ejecutaría con los permisos del
+# panel. Lo que hay en la carpeta compartida se consulta dentro del
+# contenedor de asistentes y los commits pasan en un fichero de intercambio.
+GIT_BASE_ENV = dict(os.environ, HOME=DATA_DIR, GIT_TERMINAL_PROMPT="0", GIT_NO_LAZY_FETCH="1",
+                    GIT_COMMITTER_NAME="Panel de desarrollo", GIT_COMMITTER_EMAIL="desarrollo@datoo.es",
+                    GIT_AUTHOR_NAME="Panel de desarrollo", GIT_AUTHOR_EMAIL="desarrollo@datoo.es",
+                    GIT_SSH_COMMAND=(f"ssh -i {KEYS}/datoov16 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "
+                                     f"-o UserKnownHostsFile={KEYS}/known_hosts"))
+
+
+def git(*args, wt=None, check=True, timeout=300):
+    """git sobre la copia del panel. wt = (carpeta, gitdir) para trabajar en
+    una carpeta de solicitud, siempre con su gitdir explícito."""
+    genv, cwd = dict(GIT_BASE_ENV), DATA_DIR
+    if wt:
+        genv.update(GIT_DIR=wt[1], GIT_WORK_TREE=wt[0])
+        cwd = wt[0]
+    else:
+        genv["GIT_DIR"] = PANEL_REPO
+    r = subprocess.run(["git", *args], cwd=cwd, env=genv, capture_output=True, text=True, timeout=timeout)
     if check and r.returncode:
         raise RuntimeError((r.stderr or r.stdout).strip()[-500:])
     return r.stdout
 
 
 def git_fetch():
+    """Trae GitHub a la copia del panel (la crea la primera vez)."""
     try:
-        git("fetch", "--quiet", "origin")
+        if not os.path.isdir(PANEL_REPO):
+            subprocess.run(["git", "init", "--quiet", "--bare", PANEL_REPO], check=True, env=GIT_BASE_ENV)
+            git("remote", "add", "origin", GIT_URL)
+            git("config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+        git("fetch", "--quiet", "--prune", "origin", timeout=900)
         return True
-    except Exception:
+    except Exception as e:
+        app.logger.warning("git fetch: %s", e)
         return False
+
+
+def sandbox(cmd, u, timeout=60):
+    """Ejecuta un comando en la carpeta compartida, dentro del contenedor de
+    asistentes y con el usuario de un puesto. Devuelve (código, salida)."""
+    if SANDBOX_LOCAL:  # solo para las pruebas del panel
+        r = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True, timeout=timeout)
+        return r.returncode, r.stdout + r.stderr
+    return cexec(cmd, u=u, timeout=timeout)
+
+
+def exchange_dir(prefix):
+    """Carpeta de intercambio: (ruta en el panel, ruta en los asistentes)."""
+    name = f"{prefix}-{secrets.token_hex(4)}"
+    path = os.path.join(REVISION_DIR, name)
+    os.makedirs(path, exist_ok=True)
+    os.chmod(path, 0o2775)
+    return path, (path if SANDBOX_LOCAL else f"/workspace/revision/{name}"), name
+
+
+def dev_sync(u):
+    """Copia a la del panel los commits de desarrollo (refs/dev/head)."""
+    path, inner, _name = exchange_dir("paso")
+    try:
+        code, out = sandbox(["git", "rev-parse", "HEAD"], u)
+        head = out.strip().splitlines()[-1] if code == 0 and out.strip() else ""
+        if not SHA_RE.match(head):
+            raise RuntimeError(f"No se puede leer la rama de desarrollo: {out.strip()[-200:]}")
+        if subprocess.run(["git", "cat-file", "-e", head + "^{commit}"], capture_output=True,
+                          env=dict(GIT_BASE_ENV, GIT_DIR=PANEL_REPO)).returncode == 0:
+            git("update-ref", "refs/dev/head", head)  # ya lo tenemos
+            return head
+        base = git("rev-parse", "--verify", "--quiet", "refs/remotes/origin/main", check=False).strip()
+        cmd = ["git", "bundle", "create", f"{inner}/dev.bundle", "HEAD"]
+        code, out = sandbox(cmd + ([f"^{base}"] if base else []), u, timeout=300)
+        if code != 0:  # desarrollo no conoce aún ese main: se pasa la rama entera
+            code, out = sandbox(cmd, u, timeout=600)
+        if code != 0:
+            raise RuntimeError(f"No se pueden leer los commits de desarrollo: {out.strip()[-200:]}")
+        git("fetch", "--quiet", os.path.join(path, "dev.bundle"), "+HEAD:refs/dev/head")
+        return head
+    finally:
+        shutil.rmtree(path, ignore_errors=True)
 
 
 def pending_commits():
     """Commits de desarrollo que todavía no están en main."""
     out = git("log", "--cherry-pick", "--right-only", "--no-merges",
-              "--format=%H|%an|%ae|%ad|%s", "--date=format:%Y-%m-%d %H:%M", "origin/main...HEAD")
+              "--format=%H|%an|%ae|%ad|%s", "--date=format:%Y-%m-%d %H:%M", "origin/main...refs/dev/head")
     asked = set()
     for r in sql("SELECT commits FROM solicitudes WHERE status='pendiente'"):
         asked.update(json.loads(r["commits"]))
@@ -463,52 +569,159 @@ def pending_commits():
     return commits
 
 
-def dirty_files():
-    """Ficheros modificados sin confirmar en la carpeta común."""
-    return [l[3:] for l in git("status", "--porcelain").splitlines() if l.strip()][:200]
+def is_build(path):
+    """Ficheros generados: dependencias y compilados de los frontends."""
+    return "/node_modules/" in f"/{path}" or "/static/app/" in f"/{path}"
 
 
-def changed_modules():
+def worktree_changes(u):
+    """Ficheros de la carpeta común con cambios sin confirmar."""
+    code, out = sandbox(["git", "status", "--porcelain", "--untracked-files=all"], u, timeout=120)
+    if code != 0:
+        raise RuntimeError(out.strip()[-200:])
+    return [l[3:].strip().strip('"') for l in out.splitlines() if len(l) > 3]
+
+
+def dirty_files(u):
+    """Cambios sin confirmar que no son ficheros generados."""
+    return [f for f in worktree_changes(u) if not is_build(f)][:200]
+
+
+def changed_modules(u):
     """Módulos que desarrollo tiene distintos de main, confirmados o no."""
-    files = git("diff", "--name-only", "origin/main").splitlines()
-    files += git("ls-files", "--others", "--exclude-standard").splitlines()
-    mods = {f.split("/", 1)[0] for f in files if "/" in f}
+    files = git("diff", "--name-only", "origin/main", "refs/dev/head").splitlines() + worktree_changes(u)
+    mods = {f.split("/", 1)[0] for f in files if "/" in f and "/node_modules/" not in f}
     return sorted(m for m in mods if os.path.isfile(os.path.join(REPO, m, "__manifest__.py")))
+
+
+def worktree_add(prefix, rev):
+    """Carpeta de trabajo de una solicitud. Devuelve (base, nombre, wt)."""
+    base, _inner, name = exchange_dir(prefix)
+    code = os.path.join(base, "codigo")
+    git("worktree", "prune")
+    git("worktree", "add", "--quiet", "--detach", code, rev)
+    # El gitdir se anota ahora, antes de que nadie más pueda tocar la carpeta.
+    gitdir = open(os.path.join(code, ".git")).read().split("gitdir:", 1)[1].strip()
+    if not os.path.realpath(gitdir).startswith(os.path.realpath(PANEL_REPO) + os.sep):
+        raise RuntimeError("Carpeta de trabajo inesperada.")
+    for root, dirs, _files in os.walk(code):  # los asistentes compilan aquí dentro
+        for d in dirs:
+            os.chmod(os.path.join(root, d), 0o2775)
+    os.chmod(code, 0o2775)
+    return base, name, (code, gitdir)
+
+
+def worktree_remove(base, wt):
+    git("worktree", "remove", "--force", wt[0], check=False)
+    shutil.rmtree(base, ignore_errors=True)
+    git("worktree", "prune", check=False)
+
+
+def stream_exec(job, container, cmd, user, workdir, timeout=1800):
+    """Ejecuta un comando en un contenedor y vuelca su salida en la tarea."""
+    r = docker("POST", f"/containers/{container}/exec", json=dict(
+        AttachStdout=True, AttachStderr=True, Tty=True, User=user, Cmd=cmd, WorkingDir=workdir,
+        Env=[f"HOME=/homes/{user}", f"USER={user}", "CI=1"] if container == ASSIST_CONTAINER else []))
+    if r.status_code != 201:
+        raise RuntimeError(f"No se pudo lanzar el comando ({r.status_code}): {r.text[:200]}")
+    eid = r.json()["Id"]
+    with docker("POST", f"/exec/{eid}/start", json=dict(Detach=False, Tty=True),
+                stream=True, timeout=(30, timeout)) as s:
+        for line in s.iter_lines():
+            job.log(ANSI_RE.sub("", line.decode("utf-8", "replace")))
+    code = docker("GET", f"/exec/{eid}/json").json().get("ExitCode")
+    if code != 0:
+        raise RuntimeError(f"El comando terminó con código {code}")
+
+
+def build_frontends(job, name, wt, u):
+    """Compila los frontends React que cambia la solicitud y confirma el resultado.
+
+    Se compila en el contenedor de asistentes, con el usuario que solicita: es
+    código del cliente y el panel no lo ejecuta. Así el compilado que llega a
+    producción sale solo de main más la solicitud, no del trabajo de los demás.
+    """
+    files = git("diff", "--name-only", "origin/main", "HEAD", wt=wt).splitlines()
+    mods = sorted({f.split("/", 1)[0] for f in files if f.count("/") >= 2 and f.split("/")[1] == "frontend"})
+    mods = [m for m in mods if os.path.isfile(os.path.join(wt[0], m, "frontend", "package.json"))]
+    for m in mods:
+        job.log(f"Compilando el frontend de {m} (la primera vez tarda unos minutos)...")
+        start = len(job.lines)
+        build = "umask 002; npm ci --no-audit --no-fund && npm run build"
+        try:
+            if SANDBOX_LOCAL:  # solo para las pruebas del panel
+                r = subprocess.run(["sh", "-c", build], cwd=os.path.join(wt[0], m, "frontend"),
+                                   capture_output=True, text=True, timeout=900)
+                job.log(r.stdout + r.stderr)
+                if r.returncode:
+                    raise RuntimeError("fallo")
+            else:
+                stream_exec(job, ASSIST_CONTAINER, ["sh", "-c", build], u,
+                            f"/workspace/revision/{name}/codigo/{m}/frontend")
+        except RuntimeError:
+            tail = " | ".join(list(job.lines)[start:][-8:])
+            raise RuntimeError(f"El frontend de {m} no compila sobre main más esta solicitud. "
+                               f"Corrige el error y vuelve a solicitar. Final de la compilación: {tail}")
+        git("add", "-A", "--", f"{m}/static/app", wt=wt)
+        if git("diff", "--cached", "--name-only", wt=wt).strip():
+            git("commit", "--quiet", "-m", f"{m}: compilación del frontend", wt=wt)
+            job.log(f"  Compilado de {m} confirmado en la solicitud.")
+        else:
+            job.log(f"  El compilado de {m} no cambia.")
+    return mods
 
 
 GH_HEADERS = {"Authorization": f"Bearer {GITHUB_TOKEN}", "Accept": "application/vnd.github+json"}
 
 
+def cherry_pick(job, wt, sha):
+    """Aplica un commit. Los conflictos en ficheros compilados no cuentan: se
+    vuelven a generar al final."""
+    r = subprocess.run(["git", "cherry-pick", "-x", sha], cwd=wt[0], capture_output=True, text=True, timeout=120,
+                       env=dict(GIT_BASE_ENV, GIT_DIR=wt[1], GIT_WORK_TREE=wt[0]))
+    if r.returncode == 0:
+        return
+    if "nothing to commit" in r.stdout + r.stderr or "is now empty" in r.stdout + r.stderr:
+        git("cherry-pick", "--skip", wt=wt, check=False)
+        return
+    conflicts = git("diff", "--name-only", "--diff-filter=U", wt=wt, check=False).split()
+    if conflicts and all(is_build(f) for f in conflicts):
+        for f in conflicts:  # se queda la versión del commit; se recompila después
+            if subprocess.run(["git", "checkout", "--theirs", "--", f], cwd=wt[0], capture_output=True,
+                              env=dict(GIT_BASE_ENV, GIT_DIR=wt[1], GIT_WORK_TREE=wt[0])).returncode:
+                git("rm", "--quiet", "--force", "--", f, wt=wt, check=False)
+            else:
+                git("add", "--", f, wt=wt)
+        git("-c", "core.editor=true", "cherry-pick", "--continue", wt=wt)
+        return
+    git("cherry-pick", "--abort", wt=wt, check=False)
+    raise RuntimeError(
+        f"El commit {sha[:8]} no se puede separar del resto: depende de cambios que no están "
+        f"en main ni en esta solicitud. Ficheros en conflicto: {', '.join(conflicts) or 'desconocidos'}. "
+        "Incluye también los commits de los que depende, o coordínate con quien los hizo.")
+
+
 def create_request(job, user, title, description, shas):
-    """Prepara una rama con los commits elegidos sobre main y la sube."""
+    """Prepara una rama con los commits elegidos sobre main, la compila y la sube."""
+    u = puesto(user)
     git_fetch()
-    order = [l for l in git("rev-list", "--reverse", "origin/main..HEAD").split() if l in set(shas)]
+    dev_sync(u)
+    order = [l for l in git("rev-list", "--reverse", "origin/main..refs/dev/head").split() if l in set(shas)]
     if not order:
         raise RuntimeError("No hay commits que solicitar.")
     n = sql("SELECT count(*) AS c FROM solicitudes WHERE user_id=?", (user["id"],), one=True)["c"] + 1
     branch = f"solicitud/{ENV_SLUG}-{user['login']}-{n}"
-    base = os.path.join(REVISION_DIR, f"{user['login']}-{n}-{secrets.token_hex(3)}")
-    wt = os.path.join(base, "codigo")
-    os.makedirs(base, exist_ok=True)
     job.log(f"Preparando {branch} con {len(order)} commits sobre main...")
-    git("worktree", "add", "--quiet", "--detach", wt, "origin/main")
+    base, name, wt = worktree_add(f"{user['login']}-{n}", "origin/main")
     try:
         for sha in order:
-            r = subprocess.run(["git", "-c", "safe.directory=*", "cherry-pick", "-x", sha], cwd=wt,
-                               capture_output=True, text=True, timeout=120,
-                               env=dict(os.environ, HOME=DATA_DIR, GIT_COMMITTER_NAME="Panel de desarrollo",
-                                        GIT_COMMITTER_EMAIL="desarrollo@datoo.es"))
-            if r.returncode:
-                files = git("diff", "--name-only", "--diff-filter=U", cwd=wt, check=False).split()
-                raise RuntimeError(
-                    f"El commit {sha[:8]} no se puede separar del resto: depende de cambios que no están "
-                    f"en main ni en esta solicitud. Ficheros en conflicto: {', '.join(files) or 'desconocidos'}. "
-                    "Incluye también los commits de los que depende, o coordínate con quien los hizo.")
+            cherry_pick(job, wt, sha)
             job.log(f"  {sha[:8]} aplicado.")
-        git("push", "--quiet", "origin", f"HEAD:refs/heads/{branch}", cwd=wt)
+        build_frontends(job, name, wt, u)
+        git("push", "--quiet", "origin", f"HEAD:refs/heads/{branch}", wt=wt)
         job.log("Rama de la solicitud subida a GitHub.")
         try:  # respaldo de la rama de desarrollo completa
-            git("push", "--quiet", "origin", f"HEAD:refs/heads/{DEV_BRANCH}")
+            git("push", "--quiet", "--force", "origin", f"refs/dev/head:refs/heads/{DEV_BRANCH}")
         except Exception as e:
             job.log(f"Aviso: no se pudo subir {DEV_BRANCH}: {e}")
         pr_url = f"https://github.com/{GITHUB_REPO}/compare/main...{branch}?expand=1"
@@ -526,12 +739,11 @@ def create_request(job, user, title, description, shas):
                                                  json.dumps(order), branch, "pendiente", pr_url, now()))
         job.log("Solicitud registrada. Datoo la revisará y la pasará a producción.")
         try:
-            review_request(job, sid, base)
+            review_request(job, sid, base, name, wt)
         except Exception as e:
             job.log(f"Aviso: la revisión automática no se ha completado: {e}")
     finally:
-        git("worktree", "remove", "--force", wt, check=False)
-        shutil.rmtree(base, ignore_errors=True)
+        worktree_remove(base, wt)
 
 
 # ------------------------------------------------------- revisión automática
@@ -578,16 +790,17 @@ def reviewer():
     return None
 
 
-def review_request(job, sid, base):
+def review_request(job, sid, base, name, wt):
     """Prueba la solicitud aislada (main más sus commits) y pide el informe al agente."""
     sol = sql("SELECT * FROM solicitudes WHERE id=?", (sid,), one=True)
-    wt, name = os.path.join(base, "codigo"), os.path.basename(base)
-    files = git("diff", "--name-only", "origin/main", "HEAD", cwd=wt).splitlines()
-    diff = git("diff", "origin/main", "HEAD", cwd=wt)
+    files = git("diff", "--name-only", "origin/main", "HEAD", wt=wt).splitlines()
+    # El compilado de los frontends no se revisa: se genera a partir del código.
+    diff = git("diff", "origin/main", "HEAD", "--", ".", ":(exclude,glob)**/static/app/**", wt=wt)
+    files = [f for f in files if not is_build(f)]
     mods = sorted({f.split("/", 1)[0] for f in files if "/" in f
-                   and os.path.isfile(os.path.join(wt, f.split("/", 1)[0], "__manifest__.py"))})
-    new = [m for m in mods if not os.path.isdir(os.path.join(REPO, ".git")) or
-           git("ls-tree", "--name-only", "origin/main", m + "/__manifest__.py", check=False).strip() == ""]
+                   and os.path.isfile(os.path.join(wt[0], f.split("/", 1)[0], "__manifest__.py"))})
+    new = [m for m in mods
+           if git("ls-tree", "--name-only", "origin/main", m + "/__manifest__.py", check=False).strip() == ""]
     job.log(f"Revisión automática. Módulos: {', '.join(mods) or 'ninguno'}.")
 
     # Prueba: actualizar o instalar esos módulos en una copia de la base de datos de la
@@ -610,7 +823,7 @@ def review_request(job, sid, base):
             start = len(job.lines)
             if update or install:
                 try:
-                    odoo_exec(job, cmd)
+                    stream_exec(job, ODOO_CONTAINER, cmd, "odoo", "/")
                     result = "CORRECTA: Odoo ha terminado sin errores."
                 except RuntimeError as e:
                     result = f"FALLIDA: {e}"
@@ -773,7 +986,7 @@ def fetch_source(job):
     raise RuntimeError("El origen de producción no está configurado en este entorno. Avisa a Datoo.")
 
 
-def restore_from_production(job, path=None):
+def restore_from_production(job, path=None, u=None):
     """Sustituye la base de datos de la empresa por una copia de producción.
 
     Sin path, pide la copia al servidor de producción; con path, usa ese
@@ -798,7 +1011,8 @@ def restore_from_production(job, path=None):
     xmlrpc.client.ServerProxy(ODOO_URL + "/xmlrpc/2/db").rename(MASTER, tmp, DEV_DB)
     # Lo que desarrollo tiene distinto de producción hay que volver a aplicarlo.
     git_fetch()
-    changed, after = set(changed_modules()), installed_modules(DEV_DB)
+    dev_sync(u)
+    changed, after = set(changed_modules(u)), installed_modules(DEV_DB)
     update, install = sorted(changed & after), sorted((changed & before) - after)
     if update or install:
         job.log(f"Aplicando los cambios de desarrollo. Actualizar: {', '.join(update) or 'ninguno'}. "
@@ -806,7 +1020,7 @@ def restore_from_production(job, path=None):
         cmd = ["odoo", "-d", DEV_DB, "--stop-after-init", "--no-http", "--workers=0",
                "--max-cron-threads=0", "--log-level=warn"]
         cmd += (["-u", ",".join(update)] if update else []) + (["-i", ",".join(install)] if install else [])
-        odoo_exec(job, cmd)
+        stream_exec(job, ODOO_CONTAINER, cmd, "odoo", "/")
     else:
         job.log("Desarrollo no tiene módulos distintos de producción: no hay nada que actualizar.")
     odoo_restart(job)
@@ -840,21 +1054,26 @@ def resolve_backup(origin, rel):
 
 
 def repos():
+    """Rama y último commit de cada repositorio de código."""
     out = []
-    if not os.path.isdir(REPOS_DIR):
-        return out
-    for name in sorted(os.listdir(REPOS_DIR)):
-        path = os.path.join(REPOS_DIR, name)
-        try:
-            git = ["git", "-c", "safe.directory=*", "-C", path]
-            branch = subprocess.run(git + ["rev-parse", "--abbrev-ref", "HEAD"], capture_output=True,
-                                    text=True, timeout=10, check=True).stdout.strip()
-            log = subprocess.run(git + ["log", "-1", "--format=%h|%ad|%s", "--date=format:%Y-%m-%d %H:%M"],
-                                 capture_output=True, text=True, timeout=10, check=True).stdout.strip()
-            sha, date, subject = log.split("|", 2)
-            out.append(dict(name=name, branch=branch, sha=sha, date=date, subject=subject))
-        except Exception:
-            out.append(dict(name=name, branch="?", sha="?", date="", subject="No se pudo leer el repositorio"))
+    fmt = "--format=%h|%ad|%s"
+    try:  # carpeta compartida: se pregunta dentro del contenedor de asistentes
+        u = puesto()
+        _c, branch = sandbox(["git", "rev-parse", "--abbrev-ref", "HEAD"], u)
+        _c, log = sandbox(["git", "log", "-1", fmt, "--date=format:%Y-%m-%d %H:%M"], u)
+        sha, date, subject = log.strip().splitlines()[-1].split("|", 2)
+        out.append(dict(name="datoov16", branch=branch.strip().splitlines()[-1], sha=sha, date=date, subject=subject))
+    except Exception:
+        out.append(dict(name="datoov16", branch=DEV_BRANCH, sha="", date="", subject=""))
+    path = os.path.join(REPOS_DIR, "modulos_github16")  # de solo lectura para todos
+    try:
+        g_ = ["git", "-c", "safe.directory=*", "-C", path]
+        log = subprocess.run(g_ + ["log", "-1", fmt, "--date=format:%Y-%m-%d %H:%M"], capture_output=True,
+                             text=True, timeout=10, check=True).stdout.strip()
+        sha, date, subject = log.split("|", 2)
+        out.append(dict(name="modulos_github16", branch="main (solo lectura)", sha=sha, date=date, subject=subject))
+    except Exception:
+        pass
     return out
 
 
@@ -866,6 +1085,11 @@ FAILS = {}
 def guard():
     if request.endpoint in ("panel.login", "panel.health"):
         return None
+    if (request.endpoint or "").startswith("panel.api_"):
+        token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+        g.user = sql("SELECT * FROM users WHERE api_hash=? AND active=1",
+                     (hashlib.sha256(token.encode()).hexdigest(),), one=True) if token else None
+        return None if g.user else (jsonify(error="Credencial del entorno no válida. Entra en el panel."), 401)
     g.user = sql("SELECT * FROM users WHERE id=? AND active=1", (session.get("uid"),), one=True)
     if not g.user:
         session.clear()
@@ -978,7 +1202,8 @@ def production_restore():
     if request.form.get("confirm", "").strip().lower() != "restaurar":
         flash("Para restaurar desde producción, escribe «restaurar» en la casilla.", "error")
         return redirect(url_for("panel.bases"))
-    job = start_job(f"Restaurar {DEV_DB} desde producción", restore_from_production)
+    u = puesto()
+    job = start_job(f"Restaurar {DEV_DB} desde producción", lambda job: restore_from_production(job, u=u))
     return job_redirect(job, url_for("panel.bases"))
 
 
@@ -1130,8 +1355,9 @@ def backup_restore_company():
     if request.form.get("confirm", "").strip().lower() != "restaurar":
         flash(f"Para sustituir {DEV_DB}, escribe «restaurar» en la casilla.", "error")
         return redirect(url_for("panel.backups"))
+    u = puesto()
     job = start_job(f"Restaurar {DEV_DB} desde {os.path.basename(path)}",
-                    lambda job: restore_from_production(job, path))
+                    lambda job: restore_from_production(job, path, u))
     return job_redirect(job, url_for("panel.backups"))
 
 
@@ -1283,7 +1509,8 @@ def requests_page():
     commits, dirty, error = [], [], ""
     try:
         git_fetch()
-        commits, dirty = pending_commits(), dirty_files()
+        dev_sync(puesto())
+        commits, dirty = pending_commits(), dirty_files(puesto())
     except Exception as e:
         error = str(e)
     mine = g.user["email"].lower()
@@ -1325,16 +1552,12 @@ def request_review():
     sol = sql("SELECT * FROM solicitudes WHERE id=?", (request.form.get("id", type=int),), one=True) or abort(404)
 
     def run(job):
-        git("fetch", "--quiet", "origin")
-        base = os.path.join(REVISION_DIR, f"{sol['login']}-r{sol['id']}-{secrets.token_hex(3)}")
-        wt = os.path.join(base, "codigo")
-        os.makedirs(base, exist_ok=True)
-        git("worktree", "add", "--quiet", "--detach", wt, f"origin/{sol['branch']}")
+        git_fetch()
+        base, name, wt = worktree_add(f"{sol['login']}-r{sol['id']}", f"origin/{sol['branch']}")
         try:
-            review_request(job, sol["id"], base)
+            review_request(job, sol["id"], base, name, wt)
         finally:
-            git("worktree", "remove", "--force", wt, check=False)
-            shutil.rmtree(base, ignore_errors=True)
+            worktree_remove(base, wt)
 
     return job_redirect(start_job(f"Revisar la solicitud: {sol['title']}", run), url_for("panel.requests_page"))
 
@@ -1354,16 +1577,28 @@ def request_status():
 @bp.route("/solicitudes/traer-main", methods=["POST"])
 @solo_datoo
 def merge_main():
+    u = puesto()
+
     def run(job):
-        git("fetch", "--quiet", "origin")
-        job.log(f"Incorporando main a {DEV_BRANCH}...")
-        try:
-            job.log(git("-c", "user.name=Panel de desarrollo", "-c", "user.email=desarrollo@datoo.es",
-                        "merge", "--no-edit", "origin/main").strip() or "Hecho.")
-        except RuntimeError as e:
-            git("merge", "--abort", check=False)
-            raise RuntimeError(f"main no se puede incorporar automáticamente: {e}")
+        if not git_fetch():
+            raise RuntimeError("No se puede leer GitHub.")
+        path, inner, _name = exchange_dir("main")
+        try:  # main viaja a la carpeta común en un fichero; el merge se hace allí
+            git("bundle", "create", os.path.join(path, "main.bundle"), "refs/remotes/origin/main")
+            os.chmod(os.path.join(path, "main.bundle"), 0o664)
+            job.log(f"Incorporando main a {DEV_BRANCH}...")
+            code, out = sandbox(["sh", "-c", f"git fetch --quiet {inner}/main.bundle "
+                                 "+refs/remotes/origin/main:refs/remotes/origin/main "
+                                 "&& git merge --no-edit refs/remotes/origin/main"], u, timeout=300)
+            job.log(out.strip()[-1500:])
+            if code != 0:
+                sandbox(["git", "merge", "--abort"], u)
+                raise RuntimeError("main no se puede incorporar automáticamente: hay conflictos o cambios "
+                                   "sin confirmar en los mismos ficheros.")
+        finally:
+            shutil.rmtree(path, ignore_errors=True)
         job.log("Recuerda actualizar en la base de datos los módulos que hayan cambiado.")
+
     return job_redirect(start_job(f"Traer main a {DEV_BRANCH}", run), url_for("panel.requests_page"))
 
 
@@ -1427,10 +1662,70 @@ def user_disable():
         except Exception as e:
             flash(f"No se pudo limpiar su puesto de asistente: {e}", "error")
             return redirect(url_for("panel.users_page"))
-    sql("UPDATE users SET active=0, slot=NULL WHERE id=?", (row["id"],))
+    sql("UPDATE users SET active=0, slot=NULL, api_hash=NULL WHERE id=?", (row["id"],))
     audit(session["user"], f"Dar de baja al usuario {row['login']}", result="correcto")
     flash(f"Usuario {row['login']} dado de baja. Sus cuentas de asistente se han desconectado.", "ok")
     return redirect(url_for("panel.users_page"))
+
+
+# ------------------------------------------- órdenes «entorno» de los asistentes
+def api_job(title, fn):
+    try:
+        if not DEV_DB or DEV_DB not in db_names():
+            return jsonify(error="Este entorno no tiene base de datos de la empresa."), 400
+    except Exception:
+        return jsonify(error="No se puede consultar la base de datos del entorno."), 502
+    job = start_job(title, fn, user=g.user["login"])
+    if not job:
+        return jsonify(error="Hay otra operación en curso en el entorno."), 409
+    return jsonify(tarea=job.id)
+
+
+@bp.route("/api/asistente/<accion>", methods=["POST"])
+def api_action(accion):
+    data = request.get_json(silent=True) or {}
+    mods = str(data.get("modulos", "")).replace(" ", "").strip(",").lower()
+    if accion == "reiniciar":
+        return api_job("Reiniciar Odoo (asistente)", odoo_restart)
+    if accion in ("actualizar", "instalar"):
+        if not MODS_RE.match(mods):
+            return jsonify(error="Indica los módulos por su nombre técnico, separados por comas."), 400
+        flag = "-u" if accion == "actualizar" else "-i"
+
+        def run(job):
+            odoo_exec(job, ["odoo", "-d", DEV_DB, flag, mods, "--stop-after-init", "--no-http",
+                            "--workers=0", "--max-cron-threads=0", "--log-level=warn"])
+            job.log("Módulos procesados sin errores.")
+            odoo_restart(job)
+
+        return api_job(f"{accion.capitalize()} {mods} en {DEV_DB} (asistente)", run)
+    return jsonify(error="Orden desconocida."), 404
+
+
+@bp.route("/api/asistente/tarea/<jid>")
+def api_job_status(jid):
+    job = JOBS.get(jid)
+    if not job or job.user != g.user["login"]:
+        return jsonify(error="Tarea desconocida."), 404
+    lines, start = list(job.lines), request.args.get("desde", 0, type=int)
+    return jsonify(estado=job.status, lineas=lines[start:], total=len(lines))
+
+
+@bp.route("/api/asistente/registro")
+def api_logs():
+    try:
+        return jsonify(texto=odoo_logs(min(request.args.get("lineas", 200, type=int), 2000)))
+    except Exception as e:
+        return jsonify(error=f"No se pudo leer el registro: {e}"), 502
+
+
+@bp.route("/api/asistente/estado")
+def api_state():
+    st = odoo_state()
+    text = (f"Odoo: {'en marcha' if st['ok'] else st['status']} (desde {st['started']} UTC)\n"
+            f"Base de datos de la empresa: {DEV_DB or 'sin definir'}\n"
+            f"Operación en curso: {'sí' if BUSY.locked() else 'no'}")
+    return jsonify(texto=text)
 
 
 @bp.route("/static/<path:name>")

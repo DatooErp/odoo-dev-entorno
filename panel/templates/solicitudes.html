@@ -4,7 +4,7 @@
 <p class="lead">Los cambios de desarrollo siguen funcionando aquí hasta que Datoo los pasa a producción. Cada usuario solicita los suyos.</p>
 {% if error %}<div class="flash error">No se puede leer el repositorio: {{ error }}</div>{% endif %}
 {% if dirty %}
-<div class="note"><strong>Hay {{ dirty|length }} ficheros con cambios sin confirmar</strong> en la carpeta común. No tienen autor y no se pueden solicitar: pide a tu asistente que confirme los suyos.
+<div class="note"><strong>Hay {{ dirty|length }} ficheros con cambios sin confirmar</strong> en la carpeta común (sin contar los ficheros compilados). No tienen autor y no se pueden solicitar: pide a tu asistente que confirme los suyos.
 <details><summary>Ver ficheros</summary><p class="mono small">{{ dirty|join(', ') }}</p></details></div>
 {% endif %}
 <div class="card">

@@ -14,7 +14,7 @@ RUN groupadd -g 10002 devs && mkdir /homes \
          && chmod 700 /homes/u$i; \
        done \
     && git config --system --add safe.directory '*'
-COPY --chmod=755 entrypoint.sh terminal.py /usr/local/bin/
+COPY --chmod=755 entrypoint.sh terminal.py entorno /usr/local/bin/
 COPY --chmod=644 tmux.conf /etc/tmux.conf
 WORKDIR /workspace/datoov16
 CMD ["entrypoint.sh"]

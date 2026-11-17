@@ -76,7 +76,8 @@ services:
       - ./revision:/revision
       # Copias grandes que Datoo deja en el servidor para restaurarlas.
       - ./entrada:/entrada:ro
-      - ./datoov16:/repos/datoov16
+      # Solo lectura: el panel nunca ejecuta git sobre la carpeta compartida.
+      - ./datoov16:/repos/datoov16:ro
       - ./modulos_github16:/repos/modulos_github16:ro
       # Claves que solo usa el panel: subir ramas a GitHub y pedir la copia
       # de producción. Los asistentes no las ven.
@@ -134,12 +135,15 @@ services:
       # No cargar los conectores de la cuenta de Claude (correo, Drive, etc.).
       # Es una comodidad, no una barrera: usar cuentas sin conectores sensibles.
       - ENABLE_CLAUDEAI_MCP_SERVERS=false
+      # Dónde atiende el panel las órdenes «entorno» de los asistentes.
+      - PANEL_URL=http://panel:8000${PANEL_PREFIX:-}
     volumes:
       - ./datoov16:/workspace/datoov16
       - ./modulos_github16:/workspace/modulos_github16:ro
       - odoo-dev-homes:/homes
-      # Solicitudes en revisión: el agente revisor lee de aquí su encargo.
-      - ./revision:/workspace/revision:ro
+      # Zona de intercambio con el panel: encargos del revisor, compilación de
+      # las solicitudes y paso de commits entre los dos repositorios.
+      - ./revision:/workspace/revision
       # Secreto compartido con el panel para las ventanas de terminal. Solo
       # root puede leerlo; los puestos no.
       - ./terminal.secret:/run/terminal.secret:ro

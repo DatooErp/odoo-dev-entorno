@@ -65,6 +65,12 @@ además pedir la copia directamente a producción.
 `GITHUB_TOKEN`, abre el pull request. Si un commit depende de otros que no van
 en la solicitud, se rechaza con el motivo.
 
+**Compilación de los frontends.** Si la solicitud toca el `frontend/` de un
+módulo React, el panel lo compila (`npm ci && npm run build`) sobre `main` más
+la solicitud y añade el resultado en un commit propio. La compilación se
+ejecuta en el contenedor de asistentes, no en el panel. Lo que haya compilado
+en la carpeta común no viaja: allí conviven los cambios de todos.
+
 **Revisión automática.** Cada solicitud se prueba aislada: sus módulos se
 actualizan o instalan en una copia de la base de datos de la empresa cargando
 solo `main` más la solicitud. Después un agente (el Claude de un usuario de
@@ -80,6 +86,36 @@ sobrevive a cerrar la página.
 
 Las claves que usa el panel (subir ramas, pedir la copia) están en
 `ssh-panel/`, que los asistentes no ven.
+
+## Desarrollo ágil: la orden `entorno`
+
+Los asistentes aplican ellos mismos lo que desarrollan, sin acceso a Docker:
+
+| Orden | Qué hace |
+|---|---|
+| `entorno actualizar <módulos>` | actualiza los módulos en la base de datos de la empresa y reinicia Odoo |
+| `entorno instalar <módulos>` | instala módulos y reinicia Odoo |
+| `entorno reiniciar` | reinicia Odoo |
+| `entorno registro [líneas]` | final del registro de Odoo |
+| `entorno estado` | estado de Odoo y de la base de datos |
+
+La orden llama al panel con una credencial propia de cada puesto
+(`~/.entorno-token`, que se renueva en cada inicio de sesión en el panel), y
+todo queda en el historial de actividad a nombre del usuario. Los frontends
+React se compilan en el propio contenedor (`npm run build`) y se ven al
+recargar, sin reiniciar Odoo.
+
+## Seguridad: el panel y la carpeta compartida
+
+Los asistentes pueden modificar la carpeta `datoov16`, incluida la
+configuración y los ganchos de su `.git`. Por eso **el panel nunca ejecuta git
+sobre ella**: tiene su propia copia del repositorio (`repo.git`, en su
+volumen), consulta el estado de la carpeta compartida dentro del contenedor de
+asistentes y recibe los commits en un fichero de intercambio (`revision/`).
+Por el mismo motivo, en el servidor no se debe ejecutar git como root dentro
+de `datoov16/`; se hace con un usuario de puesto:
+
+    docker exec -u u1 odoo-dev-asistentes git -C /workspace/datoov16 status
 
 ## Asistentes: Claude y ChatGPT
 
