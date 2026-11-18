@@ -41,9 +41,10 @@ con su dominio. En ese caso hay que tener presente lo que **no** se separa:
 - El Odoo es uno: un reinicio o un módulo roto afecta a todos, y el código de
   cualquier usuario se ejecuta en el mismo proceso que el de los demás.
 - El código y la rama son comunes: los asistentes ven todos los módulos.
-- Odoo no lista las bases de datos (`list_db = False`); cada usuario entra a
-  las suyas desde el panel. Quien conozca el nombre de otra y tenga un usuario
-  válido en ella podría entrar igualmente.
+- El túnel cierra desde fuera el gestor, el selector y el listado de bases de
+  datos de Odoo; cada usuario entra a las suyas desde el panel. Aun así, el
+  nombre de una base de datos se puede averiguar con una llamada técnica a
+  Odoo, y quien tenga un usuario válido en ella podría entrar.
 
 ## Panel
 

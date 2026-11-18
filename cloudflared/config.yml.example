@@ -7,12 +7,13 @@ ingress:
   - hostname: desarrollo.example.com
     path: ^/websocket
     service: http://web:8072
-  # Gestor de bases de datos: desde fuera solo se permite elegir base de datos.
-  - hostname: desarrollo.example.com
-    path: ^/web/database/selector
-    service: http://web:8069
+  # Gestor, selector y listado de bases de datos: cerrados desde fuera. Cada
+  # usuario entra a las suyas desde el panel.
   - hostname: desarrollo.example.com
     path: ^/web/database
+    service: http_status:403
+  - hostname: desarrollo.example.com
+    path: ^/xmlrpc/(2/)?db
     service: http_status:403
   - hostname: desarrollo.example.com
     service: http://web:8069
