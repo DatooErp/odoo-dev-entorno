@@ -12,7 +12,6 @@
       <input type="hidden" name="_csrf" value="{{ csrf }}">
       <button class="primary">Reiniciar Odoo</button>
       <a class="btn" href="{{ url_for('panel.logs') }}">Ver registro</a>
-      {% if odoo_url %}<a class="btn" href="{{ odoo_url }}" target="_blank" rel="noopener">Abrir Odoo</a>{% endif %}
     </form>
   </div>
   <div class="card">
@@ -31,8 +30,9 @@
     <tr><th>Nombre</th><th>Módulos</th><th>Tamaño</th><th></th></tr>
     {% for d in dbs %}
     <tr><td class="mono">{{ d.name }}</td><td>{{ d.modules if d.modules is not none else '—' }}</td><td>{{ d.size }}</td>
-        <td class="num">{% if d.neutral %}<span class="tag ok">Neutralizada</span>{% elif d.neutral is not none %}<span class="tag">Sin neutralizar</span>{% endif %}</td></tr>
-    {% else %}<tr><td colspan="4" class="muted">No hay bases de datos.</td></tr>{% endfor %}
+        <td class="num">{% if d.neutral %}<span class="tag ok">Neutralizada</span>{% elif d.neutral is not none %}<span class="tag">Sin neutralizar</span>{% endif %}
+            {% if odoo_url %}<a class="btn" href="{{ odoo_url }}/web?db={{ d.name }}" target="_blank" rel="noopener">Abrir</a>{% endif %}</td></tr>
+    {% else %}<tr><td colspan="4" class="muted">{{ 'No hay bases de datos.' if es_datoo else 'No tienes ninguna base de datos asignada en este entorno. Pídesela a Datoo.' }}</td></tr>{% endfor %}
   </table>
 </div>
 {% if jobs %}

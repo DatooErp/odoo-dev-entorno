@@ -28,14 +28,22 @@ no llegue a los servidores de producción ni a la rama de trabajo del cliente.
 
 ## Modelo
 
-Un entorno es de **una empresa**: un Odoo, una rama (`desarrollo/<ENV_SLUG>`)
-y una base de datos de desarrollo compartidos por varios usuarios de esa
-empresa. Cada usuario tiene su asistente (Claude o ChatGPT, con su cuenta) y
-hace sus propias solicitudes de paso a producción. Los cambios siguen
-funcionando en desarrollo hasta que Datoo los publica.
+Un entorno tiene un Odoo y una rama (`desarrollo/<ENV_SLUG>`) comunes, y
+varias bases de datos. Cada usuario tiene un **dominio de bases de datos**:
+las que Datoo le asigna. Solo ve y opera esas, y solo ve la actividad, las
+tareas, las solicitudes y los commits de quienes comparten alguna con él.
+Datoo las ve todas.
 
-No se deben mezclar empresas en un mismo entorno: el código de cualquier
-usuario se ejecuta en el mismo Odoo y puede leer todas sus bases de datos.
+Lo normal es un entorno por empresa, con una base de datos. También se puede
+compartir un entorno entre usuarios de varias empresas con poco uso, cada uno
+con su dominio. En ese caso hay que tener presente lo que **no** se separa:
+
+- El Odoo es uno: un reinicio o un módulo roto afecta a todos, y el código de
+  cualquier usuario se ejecuta en el mismo proceso que el de los demás.
+- El código y la rama son comunes: los asistentes ven todos los módulos.
+- Odoo no lista las bases de datos (`list_db = False`); cada usuario entra a
+  las suyas desde el panel. Quien conozca el nombre de otra y tenga un usuario
+  válido en ella podría entrar igualmente.
 
 ## Panel
 
@@ -45,13 +53,14 @@ Los usuarios se dan de alta desde el panel (perfil Datoo). El primero,
 | | Cliente | Datoo |
 |---|---|---|
 | Reiniciar Odoo, ver el registro | sí | sí |
-| Instalar y actualizar módulos en la base de datos de la empresa | sí | sí |
+| Instalar y actualizar módulos en sus bases de datos | sí | sí |
 | Restaurar la base de datos desde producción (si está configurado) | sí | sí |
 | Sustituir la base de datos por un zip o dump | no | sí |
 | Conectar su cuenta de Claude o ChatGPT | sí | sí |
 | Solicitar el paso a producción de sus commits | sí | sí, de cualquiera |
 | Crear, duplicar, copiar y eliminar bases de datos; archivo de copias | no | sí |
-| Usuarios; estado de las solicitudes; traer `main` a desarrollo | no | sí |
+| Usuarios y sus bases de datos; origen de producción de cada una | no | sí |
+| Estado de las solicitudes; traer `main` a desarrollo | no | sí |
 
 **Refrescar la base de datos de la empresa.** Datoo sube un zip de Odoo o un
 dump de PostgreSQL en Copias (o lo deja en la carpeta `entrada/` del servidor
@@ -60,13 +69,15 @@ correo, sin tareas programadas, sin SII, Veri*Factu ni TicketBAI), sustituye
 la base de datos de la empresa y vuelve a aplicar los módulos que desarrollo
 tiene distintos de `main`.
 
-**Restaurar desde producción.** Con `SOURCE_SSH` y `SOURCE_DB` configurados,
-el cliente tiene un botón que pide la copia a producción en el momento. En el
-servidor de producción se instala `produccion/entregar-copia` y se autoriza la
-clave del entorno (`ssh-panel/origen`) limitada a ese programa, que solo
-entrega el volcado de las bases de datos permitidas y el commit desplegado. El
-volcado va sin adjuntos. Los módulos se reaplican comparando con el commit que
-tiene producción, que puede ir por detrás de `main`.
+**Restaurar desde producción.** Datoo configura en el panel, para cada base
+de datos, su origen: `usuario@servidor`, el nombre de la base de datos de
+producción y la clave pública de ese servidor. En el servidor de producción se
+instala `produccion/entregar-copia` y se autoriza la clave del entorno
+(`ssh-panel/origen`, el panel la muestra) limitada a ese programa, que solo
+entrega el volcado de las bases de datos permitidas y el commit desplegado.
+Con el origen configurado, los usuarios de esa base de datos tienen el botón.
+El volcado va sin adjuntos y los módulos se reaplican comparando con el commit
+que tiene producción, que puede ir por detrás de `main`.
 
 **Solicitar paso a producción** toma los commits elegidos, los aplica sobre
 `main` en una rama `solicitud/<ENV_SLUG>-<usuario>-<n>` y la sube. Si hay

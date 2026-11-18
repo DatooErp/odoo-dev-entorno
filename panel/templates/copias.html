@@ -12,11 +12,12 @@
         <button class="primary">Restaurar</button>
         {% if origin == 'archivo' %}<a class="btn" href="{{ url_for('panel.backup_download', rel=b.rel) }}">Descargar</a>{% endif %}
       </form>
-      {% if dev_db %}
+      {% if targets %}
       <form method="post" action="{{ url_for('panel.backup_restore_company') }}" class="row" style="justify-content:flex-end;margin-top:6px">
         <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="origin" value="{{ origin }}"><input type="hidden" name="rel" value="{{ b.rel }}">
+        <select name="target">{% for t in targets %}<option>{{ t }}</option>{% endfor %}</select>
         <input type="text" name="confirm" placeholder="escribe restaurar" required autocomplete="off" style="width:170px">
-        <button>Sustituir {{ dev_db }}</button>
+        <button>Sustituir</button>
       </form>{% endif %}
       {% if origin == 'archivo' %}
       <form method="post" action="{{ url_for('panel.backup_delete') }}" style="margin-top:6px" onsubmit="return confirm('¿Eliminar la copia {{ b.rel }}?')">
@@ -29,7 +30,7 @@
 {% endmacro %}
 {% block body %}
 <h1>Copias de seguridad</h1>
-<p class="lead">Al restaurar, la base de datos se crea neutralizada: sin correo, sin tareas programadas y sin envíos al SII. «Sustituir» reemplaza la base de datos de la empresa y vuelve a aplicar los cambios de desarrollo.</p>
+<p class="lead">Al restaurar, la base de datos se crea neutralizada: sin correo, sin tareas programadas y sin envíos al SII. «Sustituir» reemplaza la base de datos elegida y vuelve a aplicar los cambios de desarrollo.</p>
 <div class="card">
   <h2>Archivo del entorno</h2>
   {{ tabla(archive, 'archivo') }}

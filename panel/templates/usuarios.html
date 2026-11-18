@@ -10,18 +10,27 @@
     <input type="text" name="name" placeholder="Nombre y apellidos" required>
     <input type="email" name="email" placeholder="correo@empresa.com" required>
     <select name="role"><option value="cliente">Cliente</option><option value="datoo">Datoo</option></select>
+    <div class="small" style="flex-basis:100%">Bases de datos que podrá ver y operar:
+      {% for d in all_dbs %}<label style="margin-right:12px;white-space:nowrap"><input type="checkbox" name="dbs" value="{{ d }}"> <span class="mono">{{ d }}</span></label>{% else %}<span class="muted">no hay ninguna todavía</span>{% endfor %}</div>
     <button class="primary">Crear</button>
   </form>
-  <p class="small muted">El nombre y el correo son la firma con la que quedan registrados sus cambios. La contraseña se genera y se muestra una sola vez.</p>
+  <p class="small muted">El nombre y el correo son la firma con la que quedan registrados sus cambios. La contraseña se genera y se muestra una sola vez. Un cliente solo ve sus bases de datos y la actividad de quienes las comparten; Datoo las ve todas.</p>
 </div>
 <div class="card">
   <table>
-    <tr><th>Usuario</th><th>Nombre</th><th>Correo</th><th>Perfil</th><th>Puesto</th><th></th></tr>
+    <tr><th>Usuario</th><th>Nombre</th><th>Correo</th><th>Perfil</th><th>Puesto</th><th>Bases de datos</th><th></th></tr>
     {% for u in users %}
     <tr>
       <td class="mono">{{ u.login }}</td><td>{{ u.name }}</td><td class="small">{{ u.email }}</td>
       <td class="small">{{ 'Datoo' if u.role == 'datoo' else 'Cliente' }}</td>
       <td class="small">{% if not u.active %}<span class="tag">Baja</span>{% elif u.slot %}Puesto {{ u.slot }}{% else %}Sin puesto{% endif %}</td>
+      <td class="small">{% if u.role == 'datoo' %}Todas{% elif u.active %}
+        <form method="post" action="{{ url_for('panel.user_dbs_update') }}">
+          <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ u.id }}">
+          {% set mine = (u.dbs or '').split(',') %}
+          {% for d in all_dbs %}<label style="display:block;white-space:nowrap"><input type="checkbox" name="dbs" value="{{ d }}" {{ 'checked' if d in mine }}> <span class="mono">{{ d }}</span></label>{% endfor %}
+          <button style="margin-top:6px">Guardar</button>
+        </form>{% endif %}</td>
       <td class="num">{% if u.active %}
         <form method="post" action="{{ url_for('panel.user_password') }}" style="display:inline">
           <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ u.id }}"><button>Nueva contraseña</button></form>

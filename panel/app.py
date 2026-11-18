@@ -61,9 +61,10 @@ PUBLIC_URL = env("PUBLIC_URL", "")
 ENV_NAME = env("ENV_NAME", "Entorno de desarrollo")
 ENV_SLUG = env("ENV_SLUG", "entorno")
 DEV_BRANCH = f"desarrollo/{ENV_SLUG}"
-DEV_DB = env("DEV_DB", "")                  # base de datos de la empresa
-SOURCE_SSH = env("SOURCE_SSH", "")          # usuario@servidor de producción
-SOURCE_DB = env("SOURCE_DB", "")            # base de datos de producción
+# Valores iniciales: solo se usan para migrar un entorno de una sola base de datos.
+DEV_DB = env("DEV_DB", "")
+SOURCE_SSH = env("SOURCE_SSH", "")
+SOURCE_DB = env("SOURCE_DB", "")
 GITHUB_REPO = env("GITHUB_REPO", "DatooErp/datoov16")
 GITHUB_TOKEN = env("GITHUB_TOKEN", "")
 REPO = os.path.join(REPOS_DIR, "datoov16")       # carpeta compartida: solo lectura
@@ -81,6 +82,9 @@ ROLE_LABEL = {"cliente": "Cliente", "datoo": "Datoo"}
 LOGIN_RE = re.compile(r"^[a-z][a-z0-9_]{1,19}$")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+SSH_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}@[A-Za-z0-9.-]{1,253}$")
+HOSTKEY_RE = re.compile(r"^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp256) [A-Za-z0-9+/=]{40,800}$")
+LOG_RE = re.compile(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d+ \d+ \w+ (\S+) ")
 
 DB_RE = re.compile(r"^[a-z0-9][a-z0-9_]{1,49}$")
 MODS_RE = re.compile(r"^[a-z0-9_]+(,[a-z0-9_]+)*$")
@@ -161,8 +165,26 @@ def init_db():
              id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, login TEXT NOT NULL,
              title TEXT NOT NULL, description TEXT, commits TEXT NOT NULL, branch TEXT,
              status TEXT NOT NULL, pr_url TEXT, note TEXT, created TEXT)""")
-    if "api_hash" not in {r["name"] for r in sql("PRAGMA table_info(users)")}:
+    ucols = {r["name"] for r in sql("PRAGMA table_info(users)")}
+    if "api_hash" not in ucols:
         sql("ALTER TABLE users ADD COLUMN api_hash TEXT")
+    if "dbs" not in ucols:  # dominio de bases de datos de cada usuario
+        sql("ALTER TABLE users ADD COLUMN dbs TEXT")
+        if DEV_DB:
+            sql("UPDATE users SET dbs=? WHERE role='cliente'", (DEV_DB,))
+    sql("""CREATE TABLE IF NOT EXISTS origenes (
+             db TEXT PRIMARY KEY, ssh TEXT NOT NULL, source_db TEXT NOT NULL, host_key TEXT NOT NULL)""")
+    if DEV_DB and SOURCE_SSH and SOURCE_DB and not sql("SELECT 1 FROM origenes", one=True):
+        host, key = SOURCE_SSH.split("@")[-1], ""
+        try:
+            for line in open(os.path.join(KEYS, "known_hosts")):
+                if line.split(" ", 1)[0] == host:
+                    key = line.split(" ", 1)[1].strip()
+        except OSError:
+            pass
+        if key:
+            sql("INSERT INTO origenes (db,ssh,source_db,host_key) VALUES (?,?,?,?)",
+                (DEV_DB, SOURCE_SSH, SOURCE_DB, key))
     cols = {r["name"] for r in sql("PRAGMA table_info(solicitudes)")}
     for col in ("report", "verdict", "reviewed"):
         if col not in cols:
@@ -184,6 +206,48 @@ def solo_datoo(fn):
             abort(403)
         return fn(*a, **kw)
     return wrapper
+
+
+def known_dbs():
+    """Bases de datos existentes; vacío si PostgreSQL no responde."""
+    try:
+        return db_names()
+    except Exception:
+        return set()
+
+
+def user_dbs(user=None):
+    """Dominio de un usuario: las bases de datos que puede ver y operar.
+    Datoo las ve todas; un cliente, las que Datoo le ha asignado."""
+    user = user or g.user
+    existing = db_names()
+    if user["role"] == "datoo":
+        return sorted(existing)
+    return sorted(d for d in (user["dbs"] or "").split(",") if d and d in existing)
+
+
+def peers(user=None):
+    """Usuarios con los que se comparte alguna base de datos, uno mismo
+    incluido. Lo que hacen los demás usuarios del entorno no se le muestra."""
+    user = user or g.user
+    rows = sql("SELECT login, email, dbs, role FROM users")
+    if user["role"] == "datoo":
+        return rows
+    mine = set((user["dbs"] or "").split(",")) - {""}
+    return [r for r in rows if r["login"] == user["login"]
+            or (r["role"] != "datoo" and mine & set((r["dbs"] or "").split(",")))]
+
+
+def filter_log(text, dbs):
+    """Deja del registro de Odoo solo las líneas de unas bases de datos."""
+    out, keep = [], True
+    for line in text.splitlines():
+        m = LOG_RE.match(line)
+        if m:
+            keep = m.group(1) in dbs or m.group(1) == "?"
+        if keep:
+            out.append(line)
+    return "\n".join(out)
 
 
 def free_slot():
@@ -396,6 +460,12 @@ aplícalo tú y comprueba que ha ido bien antes de darlo por hecho:
 - Módulo nuevo: `entorno instalar <modulo>`.
 - Si algo falla: `entorno registro` muestra el final del registro de Odoo.
   Corrige y repite hasta que termine con «Resultado: correcto».
+
+Si tienes más de una base de datos, añade `--bd <nombre>` a `entorno
+actualizar` e `instalar`; `entorno estado` te dice cuáles son las tuyas.
+
+Este entorno puede compartirse con usuarios de otras empresas: el código es
+común. Toca solo los módulos que te pidan y no cambies los de otros.
 
 `entorno` es una orden de este contenedor. No tienes acceso a Docker ni al
 servidor de Odoo: no intentes reiniciarlo de otra forma.
@@ -838,12 +908,15 @@ def review_request(job, sid, base, name, wt):
     # Prueba: actualizar o instalar esos módulos en una copia de la base de datos de la
     # empresa, cargando solo el código de la solicitud.
     result, log = "No se ha podido hacer la prueba: no hay módulos o no hay base de datos de la empresa.", ""
-    if mods and DEV_DB and DEV_DB in db_names():
+    owner = sql("SELECT * FROM users WHERE id=?", (sol["user_id"],), one=True)
+    test_dbs = user_dbs(owner) if owner else []
+    test_db = next((d for d in test_dbs if not d.startswith("revision_")), "")
+    if mods and test_db:
         copy = f"revision_{sid}"
         if copy in db_names():
             odoo_db("/web/database/drop", dict(name=copy))
-        job.log(f"Duplicando {DEV_DB} para la prueba...")
-        odoo_db("/web/database/duplicate", dict(name=DEV_DB, new_name=copy, neutralize_database="on"))
+        job.log(f"Duplicando {test_db} para la prueba...")
+        odoo_db("/web/database/duplicate", dict(name=test_db, new_name=copy, neutralize_database="on"))
         try:
             installed = installed_modules(copy)
             update = [m for m in mods if m in installed]
@@ -1101,96 +1174,99 @@ def installed_modules(name):
         return set()
 
 
-def source_ssh(command, stdout, timeout):
+def source_for(db):
+    """Origen de producción configurado para una base de datos, si lo tiene."""
+    return sql("SELECT * FROM origenes WHERE db=?", (db,), one=True)
+
+
+def source_ssh(src, command, stdout, timeout):
+    known = os.path.join(DATA_DIR, "known_hosts_origenes")
+    with open(known, "w") as f:  # solo se confía en los servidores dados de alta por Datoo
+        for r in sql("SELECT ssh, host_key FROM origenes"):
+            f.write(f"{r['ssh'].split('@')[-1]} {r['host_key']}\n")
     return subprocess.run(
         ["ssh", "-i", f"{KEYS}/origen", "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
-         "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={KEYS}/known_hosts",
-         SOURCE_SSH, command], stdout=stdout, stderr=subprocess.PIPE, timeout=timeout)
+         "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={known}",
+         src["ssh"], command], stdout=stdout, stderr=subprocess.PIPE, timeout=timeout)
 
 
-def source_commit():
+def source_commit(src):
     """Commit de datoov16 desplegado en producción, si se puede saber."""
-    if not (SOURCE_SSH and SOURCE_DB):
-        return ""
     try:
-        r = source_ssh("commit", subprocess.PIPE, 30)
-        sha = r.stdout.decode().strip()
+        sha = source_ssh(src, "commit", subprocess.PIPE, 30).stdout.decode().strip()
         return sha if SHA_RE.match(sha) else ""
     except Exception:
         return ""
 
 
-def fetch_source(job):
-    """Trae la copia de producción. Devuelve la ruta del fichero."""
+def fetch_source(job, src):
+    """Pide a producción el volcado de una base de datos. Devuelve la ruta."""
     folder = os.path.join(BACKUP_DIR, "origen")
     os.makedirs(folder, exist_ok=True)
-    if SOURCE_SSH and SOURCE_DB:
-        dest = os.path.join(folder, f"{SOURCE_DB}_{datetime.datetime.now():%Y%m%d_%H%M%S}.dump")
-        job.log(f"Pidiendo a producción la copia de {SOURCE_DB} (sin adjuntos)...")
-        with open(dest + ".tmp", "wb") as f:
-            r = source_ssh(SOURCE_DB, f, 7200)
-        with open(dest + ".tmp", "rb") as f:
-            magic = f.read(5)
-        if r.returncode or magic != b"PGDMP":
-            os.remove(dest + ".tmp")
-            raise RuntimeError("Producción no ha entregado la copia: "
-                               + (r.stderr.decode("utf-8", "replace").strip()[-300:] or "respuesta inesperada"))
-        os.replace(dest + ".tmp", dest)
-        for old in sorted(f for f in os.listdir(folder) if f.startswith(SOURCE_DB + "_"))[:-1]:
-            os.remove(os.path.join(folder, old))
-        job.log(f"Copia recibida ({human(os.path.getsize(dest))}).")
-        return dest
-    files = backup_files(SOURCE_DIR)
-    if files:
-        job.log(f"Usando la copia de producción más reciente: {files[0]['rel']} ({files[0]['mtime']}).")
-        return os.path.join(SOURCE_DIR, files[0]["rel"])
-    raise RuntimeError("El origen de producción no está configurado en este entorno. Avisa a Datoo.")
+    name = src["source_db"]
+    dest = os.path.join(folder, f"{name}_{datetime.datetime.now():%Y%m%d_%H%M%S}.dump")
+    job.log(f"Pidiendo a producción la copia de {name} (sin adjuntos)...")
+    with open(dest + ".tmp", "wb") as f:
+        r = source_ssh(src, name, f, 7200)
+    with open(dest + ".tmp", "rb") as f:
+        magic = f.read(5)
+    if r.returncode or magic != b"PGDMP":
+        os.remove(dest + ".tmp")
+        raise RuntimeError("Producción no ha entregado la copia: "
+                           + (r.stderr.decode("utf-8", "replace").strip()[-300:] or "respuesta inesperada"))
+    os.replace(dest + ".tmp", dest)
+    for old in sorted(f for f in os.listdir(folder) if f.startswith(name + "_"))[:-1]:
+        os.remove(os.path.join(folder, old))
+    job.log(f"Copia recibida ({human(os.path.getsize(dest))}).")
+    return dest
 
 
-def restore_from_production(job, path=None, u=None):
-    """Sustituye la base de datos de la empresa por una copia de producción.
+def restore_from_production(job, target, path=None, u=None):
+    """Sustituye una base de datos de desarrollo por una copia de producción.
 
-    Sin path, pide la copia al servidor de producción; con path, usa ese
-    fichero (un zip de Odoo o un dump de PostgreSQL que ha aportado Datoo).
+    Sin path, pide la copia al servidor de producción de esa base de datos;
+    con path, usa ese fichero (un zip de Odoo o un volcado que aporta Datoo).
     """
-    if not DEV_DB:
-        raise RuntimeError("Este entorno no tiene definida su base de datos de desarrollo.")
-    path = path or fetch_source(job)
-    before = installed_modules(DEV_DB)
-    tmp = DEV_DB + "_nueva"
+    src = source_for(target)
+    if not path:
+        if not src:
+            raise RuntimeError(f"{target} no tiene configurado su origen de producción. Avisa a Datoo.")
+        path = fetch_source(job, src)
+    before = installed_modules(target)
+    tmp = target + "_nueva"
     drop_database(tmp)
     job.log("Restaurando la copia, neutralizada...")
     restore_neutralized(job, tmp, path)
-    if DEV_DB in db_names():
-        job.log(f"Sustituyendo {DEV_DB} por la copia nueva...")
-        odoo_db("/web/database/drop", dict(name=DEV_DB))
-    xmlrpc.client.ServerProxy(ODOO_URL + "/xmlrpc/2/db").rename(MASTER, tmp, DEV_DB)
+    if target in db_names():
+        job.log(f"Sustituyendo {target} por la copia nueva...")
+        odoo_db("/web/database/drop", dict(name=target))
+    xmlrpc.client.ServerProxy(ODOO_URL + "/xmlrpc/2/db").rename(MASTER, tmp, target)
     if tmp in db_names():
-        raise RuntimeError(f"No se ha podido renombrar {tmp} a {DEV_DB}.")
-    # Lo que desarrollo tiene distinto de producción hay que volver a aplicarlo.
+        raise RuntimeError(f"No se ha podido renombrar {tmp} a {target}.")
+    # Lo que desarrollo tiene distinto de producción hay que volver a aplicarlo. Se
+    # compara con el código que tiene desplegado producción, que puede ir por detrás
+    # de main; si no se puede saber, con main.
     git_fetch()
     dev_sync(u)
-    # Se compara con el código que tiene desplegado producción, que puede ir
-    # por detrás de main; si no se puede saber, con main.
-    base = source_commit()
+    base = source_commit(src) if src else ""
     if not base or subprocess.run(["git", "cat-file", "-e", base + "^{commit}"], capture_output=True,
                                   env=dict(GIT_BASE_ENV, GIT_DIR=PANEL_REPO)).returncode:
         base = "origin/main"
     else:
         job.log(f"Producción tiene desplegado el commit {base[:8]} de datoov16.")
-    changed, after = set(changed_modules(u, base)), installed_modules(DEV_DB)
+    changed, after = set(changed_modules(u, base)), installed_modules(target)
     update, install = sorted(changed & after), sorted((changed & before) - after)
     if update or install:
         job.log(f"Aplicando los cambios de desarrollo. Actualizar: {', '.join(update) or 'ninguno'}. "
                 f"Instalar: {', '.join(install) or 'ninguno'}.")
-        cmd = ["odoo", "-d", DEV_DB, "--stop-after-init", "--no-http", "--workers=0",
+        cmd = ["odoo", "-d", target, "--stop-after-init", "--no-http", "--workers=0",
                "--max-cron-threads=0", "--log-level=warn"]
         cmd += (["-u", ",".join(update)] if update else []) + (["-i", ",".join(install)] if install else [])
         stream_exec(job, ODOO_CONTAINER, cmd, "odoo", "/")
     else:
-        job.log("Desarrollo no tiene módulos distintos de producción: no hay nada que actualizar.")
+        job.log("Ninguno de los módulos instalados difiere del código de producción: no hay nada que actualizar.")
     odoo_restart(job)
-    job.log(f"{DEV_DB} es ahora una copia de producción con los cambios de desarrollo aplicados.")
+    job.log(f"{target} es ahora una copia de producción con los cambios de desarrollo aplicados.")
 
 
 def backup_files(folder):
@@ -1277,7 +1353,7 @@ def inject():
                 ("panel.requests_page", "Solicitudes")]
         nav += [("panel.users_page", "Usuarios")] if es_datoo() else []
         nav += [("panel.activity", "Actividad")]
-    return dict(env_name=ENV_NAME, me=user, es_datoo=es_datoo(), nav=nav, dev_db=DEV_DB,
+    return dict(env_name=ENV_NAME, me=user, es_datoo=es_datoo(), nav=nav,
                 role=ROLE_LABEL.get(user["role"], "") if user else "",
                 csrf=session.get("csrf", ""), odoo_url=PUBLIC_URL, busy=BUSY.locked())
 
@@ -1328,18 +1404,24 @@ def logout():
 @bp.route("/")
 def home():
     try:
-        dbs = list_dbs()
+        allowed = set(user_dbs())
+        dbs = [d for d in list_dbs() if d["name"] in allowed]
     except Exception as e:
         dbs = []
         flash(f"No se puede conectar con PostgreSQL: {e}", "error")
+    mine = {r["login"] for r in peers()}
     return render_template("entorno.html", state=odoo_state(), repos=repos(), dbs=dbs,
-                           jobs=list(reversed(JOBS.values()))[:5])
+                           jobs=[j for j in reversed(JOBS.values()) if j.user in mine][:5])
 
 
 @bp.route("/registro")
 def logs():
     try:
-        text = odoo_logs(int(request.args.get("lineas", 300)))
+        lines = int(request.args.get("lineas", 300))
+        if es_datoo():
+            text = odoo_logs(lines)
+        else:  # solo lo que ocurre en sus bases de datos
+            text = "\n".join(filter_log(odoo_logs(lines * 6), set(user_dbs())).splitlines()[-lines:])
     except Exception as e:
         text = f"No se pudo leer el registro: {e}"
     return render_template("registro.html", text=text)
@@ -1354,22 +1436,56 @@ def restart():
 @bp.route("/bases")
 def bases():
     try:
-        dbs = list_dbs()
+        allowed = set(user_dbs())
+        dbs = [d for d in list_dbs() if d["name"] in allowed]
     except Exception as e:
         dbs = []
         flash(f"No se puede conectar con PostgreSQL: {e}", "error")
-    if not es_datoo():  # el cliente solo ve la base de datos de su empresa
-        dbs = [d for d in dbs if d["name"] == DEV_DB]
-    return render_template("bases.html", dbs=dbs, has_source=bool(SOURCE_SSH and SOURCE_DB))
+    for d in dbs:
+        d["source"] = source_for(d["name"])
+    pubkey = ""
+    if es_datoo():
+        try:
+            pubkey = open(os.path.join(KEYS, "origen.pub")).read().strip()
+        except OSError:
+            pass
+    return render_template("bases.html", dbs=dbs, pubkey=pubkey)
+
+
+@bp.route("/bases/origen", methods=["POST"])
+@solo_datoo
+def db_source():
+    name = form_db(must_exist=True)
+    if not name:
+        return redirect(url_for("panel.bases"))
+    ssh = request.form.get("ssh", "").strip()
+    source_db = request.form.get("source_db", "").strip()
+    host_key = " ".join(request.form.get("host_key", "").split()[:2])
+    sql("DELETE FROM origenes WHERE db=?", (name,))
+    if not ssh:
+        flash(f"{name} ya no tiene origen de producción.", "ok")
+    elif not (SSH_RE.match(ssh) and DB_RE.match(source_db) and HOSTKEY_RE.match(host_key)):
+        flash("Revisa el origen: usuario@servidor, nombre de la base de datos de producción y la "
+              "clave pública del servidor (por ejemplo «ssh-ed25519 AAAA...»).", "error")
+    else:
+        sql("INSERT INTO origenes (db,ssh,source_db,host_key) VALUES (?,?,?,?)", (name, ssh, source_db, host_key))
+        flash(f"Origen de producción de {name} guardado.", "ok")
+    audit(session["user"], f"Cambiar el origen de producción de {name}", ssh, "correcto")
+    return redirect(url_for("panel.bases"))
 
 
 @bp.route("/produccion/restaurar", methods=["POST"])
 def production_restore():
+    name = form_db(must_exist=True)
+    if not name:
+        return redirect(url_for("panel.bases"))
+    if name not in user_dbs():
+        abort(403)
     if request.form.get("confirm", "").strip().lower() != "restaurar":
         flash("Para restaurar desde producción, escribe «restaurar» en la casilla.", "error")
         return redirect(url_for("panel.bases"))
     u = puesto()
-    job = start_job(f"Restaurar {DEV_DB} desde producción", lambda job: restore_from_production(job, u=u))
+    job = start_job(f"Restaurar {name} desde producción", lambda job: restore_from_production(job, name, u=u))
     return job_redirect(job, url_for("panel.bases"))
 
 
@@ -1470,7 +1586,7 @@ def db_modules():
     mode = "-i" if request.form.get("mode") == "instalar" else "-u"
     if not name:
         return redirect(url_for("panel.bases"))
-    if not es_datoo() and name != DEV_DB:
+    if name not in user_dbs():
         abort(403)
     if not MODS_RE.match(mods):
         flash("Indica los módulos por su nombre técnico, separados por comas (o «all»).", "error")
@@ -1491,7 +1607,7 @@ def db_modules():
 @bp.route("/copias")
 @solo_datoo
 def backups():
-    return render_template("copias.html", archive=backup_files(BACKUP_DIR),
+    return render_template("copias.html", archive=backup_files(BACKUP_DIR), targets=sorted(known_dbs()),
                            source=backup_files(SOURCE_DIR), has_source=bool(SOURCE_DIR))
 
 
@@ -1514,12 +1630,15 @@ def backup_restore():
 @solo_datoo
 def backup_restore_company():
     path = resolve_backup(request.form.get("origin", "archivo"), request.form.get("rel", ""))
+    target = form_db("target", must_exist=True)
+    if not target:
+        return redirect(url_for("panel.backups"))
     if request.form.get("confirm", "").strip().lower() != "restaurar":
-        flash(f"Para sustituir {DEV_DB}, escribe «restaurar» en la casilla.", "error")
+        flash(f"Para sustituir {target}, escribe «restaurar» en la casilla.", "error")
         return redirect(url_for("panel.backups"))
     u = puesto()
-    job = start_job(f"Restaurar {DEV_DB} desde {os.path.basename(path)}",
-                    lambda job: restore_from_production(job, path, u))
+    job = start_job(f"Restaurar {target} desde {os.path.basename(path)}",
+                    lambda job: restore_from_production(job, target, path, u))
     return job_redirect(job, url_for("panel.backups"))
 
 
@@ -1676,9 +1795,13 @@ def requests_page():
     except Exception as e:
         error = str(e)
     mine = g.user["email"].lower()
+    near = peers()
+    emails, logins = {r["email"].lower() for r in near}, {r["login"] for r in near}
+    if not es_datoo():  # el código es común, pero cada cual ve lo suyo y lo de su empresa
+        commits = [c for c in commits if c["email"] in emails]
     for c in commits:
         c["mine"] = c["email"] == mine
-    reqs = sql("SELECT * FROM solicitudes ORDER BY id DESC LIMIT 100")
+    reqs = [r for r in sql("SELECT * FROM solicitudes ORDER BY id DESC LIMIT 300") if r["login"] in logins][:100]
     return render_template("solicitudes.html", commits=commits, dirty=dirty, error=error, reqs=reqs,
                            branch=DEV_BRANCH, has_token=bool(GITHUB_TOKEN))
 
@@ -1705,6 +1828,8 @@ def request_create():
 @bp.route("/solicitudes/<int:sid>")
 def request_view(sid):
     sol = sql("SELECT * FROM solicitudes WHERE id=?", (sid,), one=True) or abort(404)
+    if sol["login"] not in {r["login"] for r in peers()}:
+        abort(404)
     return render_template("informe.html", s=sol)
 
 
@@ -1768,7 +1893,24 @@ def merge_main():
 @solo_datoo
 def users_page():
     return render_template("usuarios.html", users=sql("SELECT * FROM users ORDER BY active DESC, login"),
-                           slots=SLOTS)
+                           slots=SLOTS, all_dbs=sorted(known_dbs()))
+
+
+def form_dbs():
+    """Bases de datos marcadas en un formulario, limitadas a las que existen."""
+    existing = known_dbs()
+    return ",".join(sorted(d for d in set(request.form.getlist("dbs")) if d in existing))
+
+
+@bp.route("/usuarios/bases", methods=["POST"])
+@solo_datoo
+def user_dbs_update():
+    row = sql("SELECT * FROM users WHERE id=?", (request.form.get("id", type=int),), one=True) or abort(404)
+    dbs = form_dbs()
+    sql("UPDATE users SET dbs=? WHERE id=?", (dbs, row["id"]))
+    audit(session["user"], f"Bases de datos de {row['login']}: {dbs or 'ninguna'}", result="correcto")
+    flash(f"Bases de datos de {row['login']}: {dbs.replace(',', ', ') or 'ninguna'}.", "ok")
+    return redirect(url_for("panel.users_page"))
 
 
 @bp.route("/usuarios/crear", methods=["POST"])
@@ -1785,8 +1927,8 @@ def user_create():
         flash("Ya existe un usuario con ese nombre de usuario o ese correo.", "error")
         return redirect(url_for("panel.users_page"))
     password, slot = secrets.token_urlsafe(10), free_slot()
-    uid = sql("INSERT INTO users (login,name,email,pwhash,role,slot,created) VALUES (?,?,?,?,?,?,?)",
-              (login, name, email, generate_password_hash(password), role, slot, now()))
+    uid = sql("INSERT INTO users (login,name,email,pwhash,role,slot,created,dbs) VALUES (?,?,?,?,?,?,?,?)",
+              (login, name, email, generate_password_hash(password), role, slot, now(), form_dbs()))
     audit(session["user"], f"Crear usuario {login} ({role})", result="correcto")
     msg = f"Usuario {login} creado. Contraseña: {password} (solo se muestra ahora)."
     if slot:
@@ -1832,15 +1974,26 @@ def user_disable():
 
 # ------------------------------------------- órdenes «entorno» de los asistentes
 def api_job(title, fn):
-    try:
-        if not DEV_DB or DEV_DB not in db_names():
-            return jsonify(error="Este entorno no tiene base de datos de la empresa."), 400
-    except Exception:
-        return jsonify(error="No se puede consultar la base de datos del entorno."), 502
     job = start_job(title, fn, user=g.user["login"])
     if not job:
         return jsonify(error="Hay otra operación en curso en el entorno."), 409
     return jsonify(tarea=job.id)
+
+
+def api_db(data):
+    """Base de datos sobre la que actúa una orden: (nombre, error)."""
+    try:
+        dbs = user_dbs()
+    except Exception:
+        return None, "No se puede consultar la base de datos del entorno."
+    wanted = str(data.get("bd") or "").strip()
+    if wanted:
+        return (wanted, None) if wanted in dbs else (None, "No tienes acceso a esa base de datos.")
+    if len(dbs) == 1:
+        return dbs[0], None
+    if not dbs:
+        return None, "No tienes ninguna base de datos asignada en este entorno. Pídesela a Datoo."
+    return None, "Tienes varias bases de datos: indica cuál con --bd <nombre>. Opciones: " + ", ".join(dbs)
 
 
 @bp.route("/api/asistente/<accion>", methods=["POST"])
@@ -1853,14 +2006,17 @@ def api_action(accion):
         if not MODS_RE.match(mods):
             return jsonify(error="Indica los módulos por su nombre técnico, separados por comas."), 400
         flag = "-u" if accion == "actualizar" else "-i"
+        db, error = api_db(data)
+        if error:
+            return jsonify(error=error), 400
 
         def run(job):
-            odoo_exec(job, ["odoo", "-d", DEV_DB, flag, mods, "--stop-after-init", "--no-http",
+            odoo_exec(job, ["odoo", "-d", db, flag, mods, "--stop-after-init", "--no-http",
                             "--workers=0", "--max-cron-threads=0", "--log-level=warn"])
             job.log("Módulos procesados sin errores.")
             odoo_restart(job)
 
-        return api_job(f"{accion.capitalize()} {mods} en {DEV_DB} (asistente)", run)
+        return api_job(f"{accion.capitalize()} {mods} en {db} (asistente)", run)
     return jsonify(error="Orden desconocida."), 404
 
 
@@ -1925,7 +2081,11 @@ def api_job_status(jid):
 @bp.route("/api/asistente/registro")
 def api_logs():
     try:
-        return jsonify(texto=odoo_logs(min(request.args.get("lineas", 200, type=int), 2000)))
+        lines = min(request.args.get("lineas", 200, type=int), 2000)
+        if es_datoo():
+            return jsonify(texto=odoo_logs(lines))
+        text = filter_log(odoo_logs(lines * 6), set(user_dbs()))
+        return jsonify(texto="\n".join(text.splitlines()[-lines:]))
     except Exception as e:
         return jsonify(error=f"No se pudo leer el registro: {e}"), 502
 
@@ -1933,8 +2093,12 @@ def api_logs():
 @bp.route("/api/asistente/estado")
 def api_state():
     st = odoo_state()
+    try:
+        dbs = ", ".join(user_dbs()) or "ninguna asignada"
+    except Exception:
+        dbs = "no se puede consultar"
     text = (f"Odoo: {'en marcha' if st['ok'] else st['status']} (desde {st['started']} UTC)\n"
-            f"Base de datos de la empresa: {DEV_DB or 'sin definir'}\n"
+            f"Tus bases de datos: {dbs}\n"
             f"Operación en curso: {'sí' if BUSY.locked() else 'no'}")
     return jsonify(texto=text)
 
@@ -1994,18 +2158,24 @@ def terminal_ws(ws, tool):
 
 @bp.route("/actividad")
 def activity():
-    return render_template("actividad.html", records=read_audit(), jobs=list(reversed(JOBS.values())))
+    mine = {r["login"] for r in peers()}
+    return render_template("actividad.html", records=[r for r in read_audit(600) if r["user"] in mine][:150],
+                           jobs=[j for j in reversed(JOBS.values()) if j.user in mine])
 
 
 @bp.route("/tareas/<jid>")
 def job_view(jid):
     job = JOBS.get(jid) or abort(404)
+    if job.user not in {r["login"] for r in peers()}:
+        abort(404)
     return render_template("tarea.html", job=job)
 
 
 @bp.route("/tareas/<jid>.json")
 def job_json(jid):
     job = JOBS.get(jid) or abort(404)
+    if job.user not in {r["login"] for r in peers()}:
+        abort(404)
     return jsonify(status=job.status, ended=job.ended, note=job.note, log="\n".join(job.lines))
 
 

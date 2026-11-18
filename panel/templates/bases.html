@@ -3,7 +3,7 @@
 {% if es_datoo %}<h1>Bases de datos</h1>
 <p class="lead">Las copias y los duplicados se crean siempre neutralizados: sin correo, sin tareas programadas y sin envíos al SII.</p>
 {% else %}<h1>Base de datos</h1>
-<p class="lead">La base de datos de desarrollo de la empresa. La comparten todos los usuarios del entorno.</p>{% endif %}
+<p class="lead">Tus bases de datos de desarrollo. Las comparten los usuarios de tu empresa en este entorno.</p>{% endif %}
 {% if es_datoo %}
 <div class="card">
   <h2>Crear una base de datos vacía</h2>
@@ -15,22 +15,6 @@
   </form>
 </div>
 {% endif %}
-{% if dev_db and has_source %}
-<div class="card">
-  <h2>Restaurar desde producción</h2>
-  <p class="small muted">Sustituye <span class="mono">{{ dev_db }}</span> por una copia de producción hecha en este momento, neutralizada y sin adjuntos, y vuelve a aplicar los cambios que hay en desarrollo. Tarda unos diez minutos. Se pierden los datos de prueba actuales y afecta a todos los usuarios del entorno.</p>
-  <form method="post" action="{{ url_for('panel.production_restore') }}" class="row">
-    <input type="hidden" name="_csrf" value="{{ csrf }}">
-    <input type="text" name="confirm" placeholder="Escribe restaurar para confirmar" required autocomplete="off" style="width:260px">
-    <button class="primary">Restaurar desde producción</button>
-  </form>
-</div>
-{% elif dev_db and es_datoo %}
-<div class="card">
-  <h2>Refrescar la base de datos de la empresa</h2>
-  <p class="small muted">Para sustituir <span class="mono">{{ dev_db }}</span> por una copia de producción, sube el zip o el dump en <a href="{{ url_for('panel.backups') }}">Copias</a> y pulsa «Sustituir {{ dev_db }}».</p>
-</div>
-{% endif %}
 {% for d in dbs %}
 <div class="card">
   <div class="row" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
@@ -39,6 +23,17 @@
       {% if d.neutral %}<span class="tag ok">Neutralizada</span>{% elif d.neutral is not none %}<span class="tag">Sin neutralizar</span>{% endif %}</span>
   </div>
   <div style="margin-top:12px">
+  {% if d.source %}
+  <details>
+    <summary>Restaurar desde producción</summary>
+    <p class="small muted">Sustituye <span class="mono">{{ d.name }}</span> por una copia de producción hecha en este momento, neutralizada y sin adjuntos, y vuelve a aplicar los cambios que hay en desarrollo. Tarda unos minutos. Se pierden los datos de prueba actuales y afecta a todos los que usan esta base de datos.</p>
+    <form method="post" action="{{ url_for('panel.production_restore') }}" class="row">
+      <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="name" value="{{ d.name }}">
+      <input type="text" name="confirm" placeholder="Escribe restaurar para confirmar" required autocomplete="off" style="width:260px">
+      <button class="primary">Restaurar desde producción</button>
+    </form>
+  </details>
+  {% endif %}
   <details>
     <summary>Instalar o actualizar módulos</summary>
     <form method="post" action="{{ url_for('panel.db_modules') }}" class="row">
@@ -50,6 +45,18 @@
     </form>
   </details>
   {% if es_datoo %}
+  <details>
+    <summary>Origen de producción{% if d.source %}: <span class="mono">{{ d.source.source_db }}</span> en <span class="mono">{{ d.source.ssh }}</span>{% else %} (sin configurar){% endif %}</summary>
+    <p class="small muted">De dónde se trae la copia cuando un usuario pulsa «Restaurar desde producción». En ese servidor hay que instalar <span class="mono">entregar-copia</span>, permitir la base de datos y autorizar esta clave limitada a ese programa:</p>
+    <p class="mono small" style="word-break:break-all">{{ pubkey or 'La clave del entorno no está generada.' }}</p>
+    <form method="post" action="{{ url_for('panel.db_source') }}" style="display:grid;gap:8px;max-width:640px">
+      <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="name" value="{{ d.name }}">
+      <input type="text" name="ssh" placeholder="usuario@servidor (vacío para quitar el origen)" value="{{ d.source.ssh if d.source }}">
+      <input type="text" name="source_db" placeholder="base de datos de producción" value="{{ d.source.source_db if d.source }}">
+      <input type="text" name="host_key" placeholder="clave pública del servidor: ssh-ed25519 AAAA..." value="{{ d.source.host_key if d.source }}">
+      <div><button class="primary">Guardar origen</button></div>
+    </form>
+  </details>
   <details>
     <summary>Archivar una copia de seguridad</summary>
     <form method="post" action="{{ url_for('panel.db_backup') }}" class="row">
@@ -77,6 +84,6 @@
   </div>
 </div>
 {% else %}
-<div class="card muted">No hay bases de datos en el entorno.</div>
+<div class="card muted">{{ 'No hay bases de datos en el entorno.' if es_datoo else 'No tienes ninguna base de datos asignada en este entorno. Pídesela a Datoo.' }}</div>
 {% endfor %}
 {% endblock %}

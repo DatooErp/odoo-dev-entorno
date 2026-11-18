@@ -9,9 +9,10 @@ db_password = CAMBIAR
 db_template = template0
 db_maxconn = 32
 dbfilter =
-; El panel usa el gestor de bases de datos por la red interna.
-; Desde fuera lo bloquea el túnel (cloudflared/config.yml).
-list_db = True
+; Odoo no lista las bases de datos: en un entorno compartido cada usuario entra
+; a las suyas desde el panel (enlace con ?db=). El panel gestiona las bases de
+; datos por la red interna con la contraseña maestra.
+list_db = False
 http_port = 8069
 gevent_port = 8072
 proxy_mode = True

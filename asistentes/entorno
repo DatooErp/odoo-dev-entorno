@@ -15,9 +15,10 @@ PANEL = os.environ.get("PANEL_URL", "http://panel:8000").rstrip("/")
 USO = """Uso:
   entorno actualizar <modulo[,modulo...]>   actualiza módulos y reinicia Odoo
   entorno instalar <modulo[,modulo...]>     instala módulos y reinicia Odoo
+                                            (con varias bases de datos: --bd <nombre>)
   entorno reiniciar                         reinicia Odoo (cambios solo de Python)
   entorno registro [lineas]                 últimas líneas del registro de Odoo
-  entorno estado                            estado de Odoo y de la base de datos
+  entorno estado                            estado de Odoo y tus bases de datos
   entorno pendientes                        tus commits aún sin solicitar
   entorno solicitar "<título>" ["<descripción>"] [--commits sha,sha]
                                             solicita el paso a producción
@@ -74,8 +75,15 @@ def main():
     args = sys.argv[1:]
     if not args or args[0] in ("-h", "--help", "ayuda"):
         print(USO)
-    elif args[0] in ("actualizar", "instalar") and len(args) == 2:
-        run(args[0], {"modulos": args[1]})
+    elif args[0] in ("actualizar", "instalar") and len(args) in (2, 4):
+        bd = ""
+        if len(args) == 4:
+            if "--bd" not in args[1:]:
+                sys.exit(USO)
+            i = args.index("--bd")
+            bd = args[i + 1] if i + 1 < len(args) else ""
+            args = args[:i] + args[i + 2:]
+        run(args[0], {"modulos": args[1], "bd": bd})
     elif args[0] == "reiniciar" and len(args) == 1:
         run("reiniciar", {})
     elif args[0] == "registro" and len(args) <= 2:
