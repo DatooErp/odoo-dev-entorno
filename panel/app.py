@@ -12,6 +12,7 @@ El panel no tiene acceso a Docker ni a producción. Habla con:
     registro y ejecutar comandos en el contenedor de Odoo de desarrollo.
 """
 import collections
+import contextlib
 import datetime
 import functools
 import hashlib
@@ -965,7 +966,7 @@ EXTRA_NEUTRALIZE = [
 
 def extra_neutralize(job, name):
     """Remata la neutralización de Odoo: SII, correo y URL del entorno."""
-    with pg(name) as c, c.cursor() as cr:
+    with pg_cursor(name) as cr:
         for table, col, value, label in EXTRA_NEUTRALIZE:
             cr.execute("""SELECT 1 FROM information_schema.columns
                           WHERE table_name=%s AND column_name=%s""", (table, col))
@@ -983,6 +984,24 @@ def extra_neutralize(job, name):
 
 
 HIDDEN_ROLE = "restauracion"
+
+
+@contextlib.contextmanager
+def pg_cursor(dbname):
+    """Cursor sobre una base de datos; confirma y cierra la conexión al salir."""
+    con = pg(dbname)
+    try:
+        with con, con.cursor() as cr:
+            yield cr
+    finally:
+        con.close()
+
+
+def drop_database(name):
+    """Elimina una base de datos, cortando antes las conexiones que tenga."""
+    pg_admin("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname=%s AND pid<>pg_backend_pid()",
+             (name,))
+    pg_admin(f'DROP DATABASE IF EXISTS "{name}"')
 
 
 def pg_admin(statement, args=None):
@@ -1018,15 +1037,15 @@ def restore_neutralized(job, name, path):
     is_zip = zipfile.is_zipfile(path)
     base, _inner, tag = exchange_dir("copia")
     try:
-        with pg() as c, c.cursor() as cr:
+        with pg_cursor("postgres") as cr:
             cr.execute("SELECT 1 FROM pg_roles WHERE rolname=%s", (HIDDEN_ROLE,))
             exists = cr.fetchone()
         if not exists:
             pg_admin(f'CREATE ROLE "{HIDDEN_ROLE}" NOLOGIN')
-        pg_admin(f'DROP DATABASE IF EXISTS "{name}"')
+        drop_database(name)
         pg_admin(f'CREATE DATABASE "{name}" OWNER "{HIDDEN_ROLE}" ENCODING \'unicode\' '
                  f'LC_COLLATE \'C\' TEMPLATE "template0"')
-        with pg(name) as c, c.cursor() as cr:  # lo mismo que prepara Odoo al crear una base de datos
+        with pg_cursor(name) as cr:  # lo mismo que prepara Odoo al crear una base de datos
             cr.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
             cr.execute("CREATE EXTENSION IF NOT EXISTS unaccent")
             cr.execute("ALTER FUNCTION unaccent(text) IMMUTABLE")
@@ -1042,7 +1061,7 @@ def restore_neutralized(job, name, path):
         # Neutralización de Odoo (correo, tareas programadas, pasarelas...) y la nuestra.
         stream_exec(job, ODOO_CONTAINER, ["odoo", "neutralize", "-d", name, "--log-level=warn"], "odoo", "/")
         extra_neutralize(job, name)
-        with pg(name) as c, c.cursor() as cr:  # identidad propia: no es la base de datos de producción
+        with pg_cursor(name) as cr:  # identidad propia: no es la base de datos de producción
             cr.execute("UPDATE ir_config_parameter SET value=%s WHERE key='database.uuid'", (str(uuid.uuid1()),))
             cr.execute("UPDATE ir_config_parameter SET value=%s WHERE key='database.secret'", (str(uuid.uuid4()),))
             cr.execute("SELECT count(*) FROM ir_cron WHERE active")
@@ -1060,7 +1079,10 @@ def restore_neutralized(job, name, path):
         job.log(f"Neutralizada antes de entregarla a Odoo ({crons} tareas programadas activas).")
         pg_admin(f'ALTER DATABASE "{name}" OWNER TO "{PG["user"]}"')
     except Exception:
-        pg_admin(f'DROP DATABASE IF EXISTS "{name}"')  # nunca se deja una copia a medias
+        try:  # nunca se deja una copia a medias
+            drop_database(name)
+        except Exception as e:
+            job.log(f"Aviso: no se ha podido eliminar la copia a medias {name}: {e}")
         raise
     finally:
         shutil.rmtree(base, ignore_errors=True)
@@ -1132,7 +1154,7 @@ def restore_from_production(job, path=None, u=None):
     path = path or fetch_source(job)
     before = installed_modules(DEV_DB)
     tmp = DEV_DB + "_nueva"
-    pg_admin(f'DROP DATABASE IF EXISTS "{tmp}"')
+    drop_database(tmp)
     job.log("Restaurando la copia, neutralizada...")
     restore_neutralized(job, tmp, path)
     if DEV_DB in db_names():
