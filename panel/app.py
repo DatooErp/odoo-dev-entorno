@@ -2244,6 +2244,17 @@ def users_page():
                            slots=SLOTS, all_dbs=sorted(known_dbs()))
 
 
+def form_password():
+    """Contraseña que escribe Datoo, o una generada si la deja en blanco.
+    Devuelve (contraseña, generada, error)."""
+    typed = request.form.get("password", "")
+    if not typed:
+        return secrets.token_urlsafe(10), True, ""
+    if len(typed) < 8 or typed != typed.strip():
+        return "", False, "La contraseña debe tener al menos 8 caracteres, sin espacios al principio ni al final."
+    return typed, False, ""
+
+
 def form_dbs():
     """Bases de datos marcadas en un formulario, limitadas a las que existen."""
     existing = known_dbs()
@@ -2274,11 +2285,16 @@ def user_create():
     if sql("SELECT 1 FROM users WHERE login=? OR (email=? AND active=1)", (login, email), one=True):
         flash("Ya existe un usuario con ese nombre de usuario o ese correo.", "error")
         return redirect(url_for("panel.users_page"))
-    password, slot = secrets.token_urlsafe(10), free_slot()
+    password, generated, error = form_password()
+    if error:
+        flash(error, "error")
+        return redirect(url_for("panel.users_page"))
+    slot = free_slot()
     uid = sql("INSERT INTO users (login,name,email,pwhash,role,slot,created,dbs) VALUES (?,?,?,?,?,?,?,?)",
               (login, name, email, generate_password_hash(password), role, slot, now(), form_dbs()))
     audit(session["user"], f"Crear usuario {login} ({role})", result="correcto")
-    msg = f"Usuario {login} creado. Contraseña: {password} (solo se muestra ahora)."
+    msg = (f"Usuario {login} creado. Contraseña: {password} (solo se muestra ahora)." if generated
+           else f"Usuario {login} creado con la contraseña indicada.")
     if slot:
         try:
             preparar_puesto(sql("SELECT * FROM users WHERE id=?", (uid,), one=True))
@@ -2294,10 +2310,14 @@ def user_create():
 @solo_datoo
 def user_password():
     row = sql("SELECT * FROM users WHERE id=?", (request.form.get("id", type=int),), one=True) or abort(404)
-    password = secrets.token_urlsafe(10)
+    password, generated, error = form_password()
+    if error:
+        flash(error, "error")
+        return redirect(url_for("panel.users_page"))
     sql("UPDATE users SET pwhash=? WHERE id=?", (generate_password_hash(password), row["id"]))
     audit(session["user"], f"Nueva contraseña para {row['login']}", result="correcto")
-    flash(f"Nueva contraseña de {row['login']}: {password} (solo se muestra ahora).", "ok")
+    flash(f"Nueva contraseña de {row['login']}: {password} (solo se muestra ahora)." if generated
+          else f"Contraseña de {row['login']} cambiada por la indicada.", "ok")
     return redirect(url_for("panel.users_page"))
 
 

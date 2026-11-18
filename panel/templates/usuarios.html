@@ -10,11 +10,12 @@
     <input type="text" name="name" placeholder="Nombre y apellidos" required>
     <input type="email" name="email" placeholder="correo@empresa.com" required>
     <select name="role"><option value="cliente">Cliente</option><option value="datoo">Datoo</option></select>
+    <input type="password" name="password" placeholder="Contraseña (en blanco: se genera)" minlength="8" autocomplete="new-password">
     <div class="small" style="flex-basis:100%">Bases de datos que podrá ver y operar:
       {% for d in all_dbs %}<label style="margin-right:12px;white-space:nowrap"><input type="checkbox" name="dbs" value="{{ d }}"> <span class="mono">{{ d }}</span></label>{% else %}<span class="muted">no hay ninguna todavía</span>{% endfor %}</div>
     <button class="primary">Crear</button>
   </form>
-  <p class="small muted">El nombre y el correo son la firma con la que quedan registrados sus cambios. La contraseña se genera y se muestra una sola vez. Un cliente solo ve sus bases de datos y la actividad de quienes las comparten; Datoo las ve todas.</p>
+  <p class="small muted">El nombre y el correo son la firma con la que quedan registrados sus cambios. La contraseña la puedes escribir tú (mínimo 8 caracteres); si la dejas en blanco, se genera y se muestra una sola vez. Un cliente solo ve sus bases de datos y la actividad de quienes las comparten; Datoo las ve todas.</p>
 </div>
 <div class="card">
   <table>
@@ -33,7 +34,9 @@
         </form>{% endif %}</td>
       <td class="num">{% if u.active %}
         <form method="post" action="{{ url_for('panel.user_password') }}" style="display:inline">
-          <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ u.id }}"><button>Nueva contraseña</button></form>
+          <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ u.id }}">
+          <input type="password" name="password" placeholder="Contraseña (en blanco: se genera)" minlength="8" autocomplete="new-password" style="width:230px">
+          <button>Cambiar contraseña</button></form>
         {% if u.id != me.id %}
         <form method="post" action="{{ url_for('panel.user_disable') }}" style="display:inline" onsubmit="return confirm('¿Dar de baja a {{ u.login }}? Se desconectan sus cuentas de asistente.')">
           <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ u.id }}"><button class="danger">Dar de baja</button></form>
