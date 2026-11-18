@@ -51,6 +51,11 @@ pre.log{background:#16181d;color:#d7dae0;padding:14px;border-radius:8px;overflow
 .login input,.login select,.login button{width:100%;margin-top:4px;margin-bottom:12px}
 .grid{grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr))}
 .scroll{overflow-x:auto}
+.card{overflow-x:auto}
+td.acciones{width:210px}
+td.acciones form{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
+td.acciones form:last-child{margin-bottom:0}
+td.acciones input,td.acciones button{width:100%}
 @media (max-width:720px){
   body{font-size:16px}
   header{padding:0 12px;gap:0 12px}
@@ -73,6 +78,7 @@ pre.log{background:#16181d;color:#d7dae0;padding:14px;border-radius:8px;overflow
   td:has(>input[type=checkbox]:only-child)+td{display:inline-block;width:calc(100% - 40px)}
   input[type=checkbox]{width:20px;height:20px}
   td.num{text-align:left;white-space:normal;padding-top:6px}
+  td.acciones{width:100%;padding-top:6px}
   /* Formularios en columna, con controles cómodos para el dedo. */
   form.row,.row{flex-direction:column;align-items:stretch!important;justify-content:flex-start!important}
   input[type=text],input[type=password],input[type=email],select,textarea{width:100%!important;font-size:16px;padding:10px}

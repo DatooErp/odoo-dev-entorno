@@ -32,13 +32,13 @@
           {% for d in all_dbs %}<label style="display:block;white-space:nowrap"><input type="checkbox" name="dbs" value="{{ d }}" {{ 'checked' if d in mine }}> <span class="mono">{{ d }}</span></label>{% endfor %}
           <button style="margin-top:6px">Guardar</button>
         </form>{% endif %}</td>
-      <td class="num">{% if u.active %}
-        <form method="post" action="{{ url_for('panel.user_password') }}" style="display:inline">
+      <td class="acciones">{% if u.active %}
+        <form method="post" action="{{ url_for('panel.user_password') }}">
           <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ u.id }}">
-          <input type="password" name="password" placeholder="Contraseña (en blanco: se genera)" minlength="8" autocomplete="new-password" style="width:230px">
+          <input type="password" name="password" placeholder="Contraseña nueva" title="En blanco: se genera una y se muestra una sola vez" minlength="8" autocomplete="new-password">
           <button>Cambiar contraseña</button></form>
         {% if u.id != me.id %}
-        <form method="post" action="{{ url_for('panel.user_disable') }}" style="display:inline" onsubmit="return confirm('¿Dar de baja a {{ u.login }}? Se desconectan sus cuentas de asistente.')">
+        <form method="post" action="{{ url_for('panel.user_disable') }}" onsubmit="return confirm('¿Dar de baja a {{ u.login }}? Se desconectan sus cuentas de asistente.')">
           <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ u.id }}"><button class="danger">Dar de baja</button></form>
         {% endif %}{% endif %}
       </td>
