@@ -57,6 +57,9 @@ def run(action, data):
         time.sleep(15)
     if status != 200:
         sys.exit(body.get("error", f"Error {status}"))
+    if "hecho" in body:  # operación inmediata, sin tarea que seguir
+        print(body["hecho"])
+        return
     seen = 0
     while True:
         status, job = call(f"tarea/{body['tarea']}?desde={seen}")

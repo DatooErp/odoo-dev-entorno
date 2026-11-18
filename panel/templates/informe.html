@@ -6,6 +6,17 @@
   {% if s.verdict %}<span class="tag {{ 'ok' if s.verdict=='APTO' else 'err' if s.verdict=='NO APTO' else 'warn' }}">Revisión: {{ s.verdict }}</span>{% endif %}</p>
 {% if s.description %}<div class="card"><h2>Descripción</h2><p style="white-space:pre-wrap;margin:0">{{ s.description }}</p></div>{% endif %}
 {% if s.note %}<div class="note">Nota de Datoo: {{ s.note }}</div>{% endif %}
+{% if st %}
+<div class="card">
+  <h2>Qué supone para producción</h2>
+  <table>
+    <tr><td><strong>Módulos nuevos</strong></td><td>{% for m in st.nuevos %}<span class="tag warn">{{ m }}</span> {% else %}<span class="muted">ninguno</span>{% endfor %}</td></tr>
+    <tr><td><strong>Módulos existentes modificados</strong></td><td>{% for m in st.modificados %}<span class="tag">{{ m }}</span> {% else %}<span class="muted">ninguno</span>{% endfor %}</td></tr>
+    <tr><td><strong>Módulos existentes a instalar en producción</strong><br><span class="small muted">instalados en desarrollo, no en producción</span></td>
+        <td>{% for db, items in st.reutilizados.items() %}<span class="mono small">{{ db }}</span>: {% for i in items %}<span class="tag">{{ i.name }} · {{ i.origen }}</span> {% endfor %}<br>{% else %}<span class="muted">ninguno detectado</span>{% endfor %}</td></tr>
+  </table>
+</div>
+{% endif %}
 <div class="card">
   <h2>Informe de la revisión automática {% if s.reviewed %}<span class="small muted">{{ s.reviewed }}</span>{% endif %}</h2>
   {% if s.report %}<pre style="white-space:pre-wrap;font:14px/1.55 inherit;margin:0">{{ s.report }}</pre>

@@ -85,6 +85,14 @@ que tiene producción, que puede ir por detrás de `main`.
 `GITHUB_TOKEN`, abre el pull request. Si un commit depende de otros que no van
 en la solicitud, se rechaza con el motivo.
 
+**Qué supone cada solicitud.** El panel calcula, y pone al principio del
+informe y en el pull request, si la solicitud crea módulos nuevos, si modifica
+módulos existentes y qué módulos ya existentes (de `datoov16`, de
+`modulos_github16` o de Odoo) se han instalado en desarrollo y producción no
+tiene. Para esto último guarda, en cada restauración desde producción, la
+lista de módulos instalados. Si no hay código y solo se ha reutilizado un
+módulo existente, la solicitud es de instalación: no lleva rama.
+
 **Compilación de los frontends.** Si la solicitud toca el `frontend/` de un
 módulo React, el panel lo compila (`npm ci && npm run build`) sobre `main` más
 la solicitud y añade el resultado en un commit propio. La compilación se
@@ -148,6 +156,19 @@ Por el mismo motivo, en el servidor no se debe ejecutar git como root dentro
 de `datoov16/`; se hace con un usuario de puesto:
 
     docker exec -u u1 odoo-dev-asistentes git -C /workspace/datoov16 status
+
+## Instrucciones de los asistentes
+
+Cada puesto recibe las mismas instrucciones para Claude (`~/.claude/CLAUDE.md`)
+y Codex (`~/.codex/AGENTS.md`); están en `INSTRUCCIONES`, en `panel/app.py`,
+y se renuevan en cada inicio de sesión en el panel. Piden, entre otras cosas:
+
+- Comprobar antes de desarrollar si lo pedido ya existe, entero o en parte,
+  en `datoov16` o `modulos_github16`, y reutilizarlo.
+- No modificar nunca `modulos_github16`: se sobrecarga con un módulo `datoo_`.
+- Crear los módulos nuevos con la estructura de Datoo (nombre, manifiesto,
+  carpetas), con Datoo como autor y el usuario en `contributors`.
+- Aplicar y comprobar cada cambio, y solicitar solo a petición del usuario.
 
 ## Asistentes: Claude y ChatGPT
 

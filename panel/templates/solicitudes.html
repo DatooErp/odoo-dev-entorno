@@ -36,6 +36,22 @@
   <p class="muted">No hay cambios confirmados pendientes de pasar a producción.</p>
   {% endif %}
 </div>
+{% if reused %}
+<div class="card">
+  <h2>Módulos existentes que producción no tiene</h2>
+  <p class="small muted">Módulos que ya existían y que se han instalado en desarrollo. Si un cambio depende de ellos, o si con instalarlos basta, hay que pedir a Datoo que los instale en producción.</p>
+  {% for db, items in reused.items() %}
+  <p><span class="mono">{{ db }}</span>: {% for i in items %}<span class="tag">{{ i.name }} · {{ i.origen }}</span> {% endfor %}</p>
+  {% endfor %}
+  <form method="post" action="{{ url_for('panel.request_create') }}" style="display:grid;gap:8px;max-width:640px">
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <input type="text" name="title" maxlength="120" required placeholder="Título: qué se necesita en producción">
+    <textarea name="description" rows="3" placeholder="Para qué se usan estos módulos y cómo se han probado"></textarea>
+    <div><button>Solicitar solo su instalación en producción</button></div>
+  </form>
+  <p class="small muted">Si además hay cambios de código, usa el formulario de arriba: la solicitud incluirá también estos módulos.</p>
+</div>
+{% endif %}
 <div class="card">
   <h2>Solicitudes del entorno</h2>
   <table>
@@ -46,13 +62,17 @@
           {% if r.note %}<br><span class="small">Nota de Datoo: {{ r.note }}</span>{% endif %}</td>
       <td class="small">{{ r.login }}</td><td class="small">{{ r.created }}</td>
       <td><span class="tag {{ 'ok' if r.status=='en producción' else 'err' if r.status=='rechazada' else 'warn' }}">{{ r.status }}</span>
-          {% if r.verdict %}<br><span class="tag {{ 'ok' if r.verdict=='APTO' else 'err' if r.verdict=='NO APTO' else 'warn' }}" style="margin-top:4px">{{ r.verdict }}</span>{% endif %}</td>
+          {% if r.verdict %}<br><span class="tag {{ 'ok' if r.verdict=='APTO' else 'err' if r.verdict=='NO APTO' else 'warn' }}" style="margin-top:4px">{{ r.verdict }}</span>{% endif %}
+          {% if r.st.nuevos %}<br><span class="tag warn" style="margin-top:4px">Módulos nuevos: {{ r.st.nuevos|length }}</span>{% endif %}
+          {% if r.st.modificados %}<br><span class="tag" style="margin-top:4px">Modifica: {{ r.st.modificados|length }}</span>{% endif %}
+          {% if r.st.reutilizados %}<br><span class="tag" style="margin-top:4px">Instalar en producción: {{ r.st.reutilizados.values()|map('length')|sum }}</span>{% endif %}</td>
       <td class="num">
         <a class="btn" href="{{ url_for('panel.request_view', sid=r.id) }}">Ver informe</a>
-        {% if es_datoo %}
+        {% if es_datoo and r.branch %}
         <form method="post" action="{{ url_for('panel.request_review') }}" style="display:inline">
           <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ r.id }}"><button>Repetir revisión</button></form>
-        <a class="btn" href="{{ r.pr_url }}" target="_blank" rel="noopener">Ver en GitHub</a>
+        {% endif %}{% if es_datoo %}
+        {% if r.pr_url %}<a class="btn" href="{{ r.pr_url }}" target="_blank" rel="noopener">Ver en GitHub</a>{% endif %}
         <form method="post" action="{{ url_for('panel.request_status') }}" class="row" style="justify-content:flex-end;margin-top:6px">
           <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ r.id }}">
           <input type="text" name="note" placeholder="Nota para el usuario" value="{{ r.note or '' }}" style="width:170px">

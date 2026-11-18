@@ -186,7 +186,9 @@ def init_db():
             sql("INSERT INTO origenes (db,ssh,source_db,host_key) VALUES (?,?,?,?)",
                 (DEV_DB, SOURCE_SSH, SOURCE_DB, key))
     cols = {r["name"] for r in sql("PRAGMA table_info(solicitudes)")}
-    for col in ("report", "verdict", "reviewed"):
+    sql("""CREATE TABLE IF NOT EXISTS lineas_base (
+             db TEXT PRIMARY KEY, modules TEXT NOT NULL, fecha TEXT)""")
+    for col in ("report", "verdict", "reviewed", "estado"):
         if col not in cols:
             sql(f"ALTER TABLE solicitudes ADD COLUMN {col} TEXT")
     if not sql("SELECT 1 FROM users", one=True) and env("PANEL_DATOO_PASSWORD"):
@@ -449,6 +451,57 @@ Trabajas en el entorno de desarrollo de una empresa. La carpeta de código, la
 rama y la base de datos son compartidas con otros usuarios de la misma
 empresa, que pueden estar trabajando a la vez.
 
+## Antes de desarrollar: comprueba si ya existe
+
+Antes de escribir código para lo que te pidan, busca si ya está hecho, entero
+o en parte, en `/workspace/datoov16` y en `/workspace/modulos_github16`: por
+nombre de módulo, por el resumen de los `__manifest__.py`, y por los modelos,
+campos y vistas implicados. Cuéntale a la persona qué has encontrado antes de
+empezar, y actúa según el caso:
+
+- **Ya existe entero** en un módulo que su base de datos no tiene instalado:
+  no lo desarrolles. Instálalo con `entorno instalar <modulo>`, que lo pruebe,
+  y si le sirve, solicita su instalación en producción.
+- **Existe en parte**: reutilízalo. Amplía el módulo existente o crea uno
+  pequeño que dependa de él y añada lo que falta; no dupliques su lógica.
+  Los módulos de `modulos_github16` no se modifican nunca: siempre se
+  sobrecargan con un módulo `datoo_` en `datoov16` que depende de ellos y
+  hereda lo que haga falta cambiar.
+- **No existe**: módulo nuevo, con la estructura de Datoo (más abajo).
+
+Si dudas entre ampliar un módulo de Datoo o crear uno nuevo, dilo en la
+descripción de la solicitud: Datoo decide dónde queda cada cosa.
+
+## Estructura de los módulos nuevos (la de Datoo)
+
+- **Nombre**: `datoo_<área>` o `datoo_<área>_<detalle>`, en minúsculas y con
+  guiones bajos. Un módulo por funcionalidad; nada específico de un cliente en
+  un módulo general.
+- **`__manifest__.py`**, con estas claves y en este orden: `name`,
+  `version` (`16.0.1.0.0`; sube el tercer número al cambiar modelos o datos y
+  el último en correcciones), `category`, `summary` (una línea), `description`
+  (en español, qué hace y para quién, con guiones para cada función),
+  `author` (`'Datoo'`), `website` (`'https://datoo.es'`), `license`
+  (`'LGPL-3'`), `depends` (solo lo que usa de verdad), `data` (primero
+  seguridad, luego datos, luego vistas) e `installable`.
+- **Colaboración**: el autor es siempre Datoo. Añade al manifiesto
+  `'contributors': ['Nombre Apellidos <correo>']` con la persona para la que
+  trabajas (su nombre y correo son los de `git config user.name` y
+  `user.email`) y, al final de la descripción, la línea «Desarrollado en
+  colaboración con <Nombre Apellidos>.». Si amplías un módulo existente, añade
+  a la persona a `contributors` sin tocar el autor.
+- **Carpetas**: `models/` (un fichero por modelo, con el nombre del modelo:
+  `res_partner.py`), `views/` (un fichero por modelo: `res_partner_views.xml`,
+  y `menu.xml`), `security/` (`ir.model.access.csv` y, si hay grupos o reglas,
+  `security.xml`), `data/`, `wizard/`, `controllers/` y
+  `static/description/icon.png`. Solo las que hagan falta.
+- **Código**: nombres técnicos de modelos y campos en inglés; textos que ve el
+  usuario, ayudas y comentarios en español. Todo modelo nuevo lleva sus
+  permisos en `ir.model.access.csv`. Hereda con `_inherit`; no copies código
+  de otros módulos.
+- Mira un módulo reciente de Datoo parecido (por ejemplo `datoo_asesoria`)
+  y sigue su estilo.
+
 ## Deja siempre el cambio funcionando y a la vista
 
 La persona espera ver lo que pide en cuanto terminas. Después de cada cambio,
@@ -495,7 +548,11 @@ Solo cuando la persona te lo pida de forma expresa:
   sin confirmar.
 - `entorno solicitar "<título>" "<descripción>"` solicita el paso a
   producción de todos tus commits pendientes. En la descripción explica qué
-  cambia y cómo probarlo. Añade `--commits <sha,sha>` para pedir solo algunos.
+  cambia y cómo probarlo, y di expresamente qué módulos son nuevos, cuáles
+  has modificado y cuáles has reutilizado sin tocarlos. Añade
+  `--commits <sha,sha>` para pedir solo algunos.
+- Si no has escrito código y solo has instalado módulos que ya existían, la
+  misma orden registra una solicitud de instalación en producción.
 - La solicitud se compila y se revisa sola; al terminar verás el veredicto.
   Cuéntaselo a la persona tal cual. Datoo decide y publica: no des el cambio
   por publicado.
@@ -512,7 +569,9 @@ No solicites por tu cuenta, ni cambios sin confirmar o sin probar.
   `git add -A` ni `git add .`: puede haber cambios sin confirmar de otros.
 - No deshagas ni reescribas cambios de otros usuarios. Si necesitas tocar un
   fichero que otro tiene a medias, avisa a la persona antes de hacerlo.
-- Solo puedes modificar `datoov16`. `modulos_github16` es de solo lectura.
+- Solo puedes modificar `datoov16`. `modulos_github16` es de solo lectura:
+  lo que haya que cambiar de un módulo suyo va en un módulo `datoo_` que lo
+  sobrecarga.
 
 El Odoo de desarrollo está en http://web:8069.
 """
@@ -773,6 +832,85 @@ def build_frontends(job, name, wt, u):
     return mods
 
 
+def module_origins():
+    """De dónde sale cada módulo conocido: datoov16 (en main) o modulos_github16."""
+    main = set(git("ls-tree", "--name-only", "origin/main", check=False).split())
+    try:
+        shared = set(os.listdir(os.path.join(REPOS_DIR, "modulos_github16")))
+    except OSError:
+        shared = set()
+    return main, shared
+
+
+def reused_modules(user):
+    """Módulos que el usuario tiene instalados en desarrollo y producción no:
+    {base de datos: [{name, origen}]}. Solo cuentan los que ya existían (en
+    datoov16, en modulos_github16 o en Odoo); los creados en desarrollo no."""
+    main, shared = module_origins()
+    out = {}
+    for db in user_dbs(user):
+        row = sql("SELECT modules FROM lineas_base WHERE db=?", (db,), one=True)
+        if not row:
+            continue  # sin copia de producción con la que comparar
+        extra = installed_modules(db) - set(json.loads(row["modules"]))
+        items = []
+        for m in sorted(extra):
+            if m in main:
+                items.append(dict(name=m, origen="datoov16"))
+            elif m in shared:
+                items.append(dict(name=m, origen="modulos_github16"))
+            elif not os.path.isdir(os.path.join(REPO, m)):
+                items.append(dict(name=m, origen="Odoo estándar"))
+        if items:
+            out[db] = items
+    return out
+
+
+def request_state(user, wt=None):
+    """Qué supone una solicitud para producción: módulos nuevos, módulos
+    existentes modificados y módulos existentes que habrá que instalar."""
+    state = dict(nuevos=[], modificados=[], reutilizados={})
+    if wt:
+        files = [f for f in git("diff", "--name-only", "origin/main", "HEAD", wt=wt).splitlines() if not is_build(f)]
+        mods = sorted({f.split("/", 1)[0] for f in files if "/" in f
+                       and os.path.isfile(os.path.join(wt[0], f.split("/", 1)[0], "__manifest__.py"))})
+        for m in mods:
+            exists = git("ls-tree", "--name-only", "origin/main", m + "/__manifest__.py", check=False).strip()
+            state["modificados" if exists else "nuevos"].append(m)
+    try:
+        state["reutilizados"] = reused_modules(user)
+    except Exception:
+        pass
+    return state
+
+
+def state_text(state):
+    """El estado de una solicitud, en texto, para el informe y el pull request."""
+    lines = [f"Módulos nuevos: {', '.join(state['nuevos']) or 'ninguno'}.",
+             f"Módulos existentes modificados: {', '.join(state['modificados']) or 'ninguno'}."]
+    if state["reutilizados"]:
+        lines.append("Módulos existentes reutilizados (instalados en desarrollo y no en producción; "
+                     "habrá que instalarlos en producción):")
+        for db, items in state["reutilizados"].items():
+            lines.append(f"  En {db}: " + ", ".join(f"{i['name']} ({i['origen']})" for i in items) + ".")
+    else:
+        lines.append("Módulos existentes reutilizados que falten en producción: ninguno detectado.")
+    return "\n".join(lines)
+
+
+def create_install_request(user, title, description):
+    """Solicitud sin código: instalar en producción módulos que ya existen."""
+    state = request_state(user)
+    if not state["reutilizados"]:
+        raise RuntimeError("No hay commits tuyos pendientes ni módulos instalados en desarrollo que falten en producción.")
+    report = ("SOLICITUD DE INSTALACIÓN\nNo lleva código: pide instalar en producción módulos que ya existen "
+              "y que en desarrollo se han instalado y probado.\n\n" + state_text(state))
+    return sql("INSERT INTO solicitudes (user_id,login,title,description,commits,branch,status,pr_url,created,"
+               "estado,report,verdict,reviewed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+               (user["id"], user["login"], title, description, "[]", "", "pendiente", "", now(),
+                json.dumps(state), report, "SOLO INSTALACIÓN", now()))
+
+
 GH_HEADERS = {"Authorization": f"Bearer {GITHUB_TOKEN}", "Accept": "application/vnd.github+json"}
 
 
@@ -826,9 +964,13 @@ def create_request(job, user, title, description, shas):
             git("push", "--quiet", "--force", "origin", f"refs/dev/head:refs/heads/{DEV_BRANCH}")
         except Exception as e:
             job.log(f"Aviso: no se pudo subir {DEV_BRANCH}: {e}")
+        state = request_state(user, wt)
+        for line in state_text(state).splitlines():
+            job.log(line)
         pr_url = f"https://github.com/{GITHUB_REPO}/compare/main...{branch}?expand=1"
         if GITHUB_TOKEN:
-            body = f"{description}\n\nSolicitado por {user['name']} ({user['email']}) desde {ENV_NAME}."
+            body = (f"{description}\n\n{state_text(state)}\n\n"
+                    f"Solicitado por {user['name']} ({user['email']}) desde {ENV_NAME}.")
             r = requests.post(f"https://api.github.com/repos/{GITHUB_REPO}/pulls", timeout=30, headers=GH_HEADERS,
                               json=dict(title=title, head=branch, base="main", body=body))
             if r.status_code == 201:
@@ -836,9 +978,10 @@ def create_request(job, user, title, description, shas):
                 job.log(f"Pull request abierto: {pr_url}")
             else:
                 job.log(f"Aviso: no se pudo abrir el pull request ({r.status_code}). Queda la rama subida.")
-        sid = sql("INSERT INTO solicitudes (user_id,login,title,description,commits,branch,status,pr_url,created) "
-                  "VALUES (?,?,?,?,?,?,?,?,?)", (user["id"], user["login"], title, description,
-                                                 json.dumps(order), branch, "pendiente", pr_url, now()))
+        sid = sql("INSERT INTO solicitudes (user_id,login,title,description,commits,branch,status,pr_url,created,"
+                  "estado) VALUES (?,?,?,?,?,?,?,?,?,?)", (user["id"], user["login"], title, description,
+                                                           json.dumps(order), branch, "pendiente", pr_url, now(),
+                                                           json.dumps(state)))
         job.log("Solicitud registrada. Datoo la revisará y la pasará a producción.")
         try:
             review_request(job, sid, base, name, wt)
@@ -860,7 +1003,12 @@ Escribe el informe en español, en texto plano, breve y concreto, con estos apar
 este orden:
 
 CLASIFICACIÓN
-Qué módulos toca y de qué tipo es el cambio: modelo de datos (campos, tablas), permisos y
+Empieza por lo que supone para producción, a partir del apartado «QUÉ SUPONE» que se te da:
+si crea módulos nuevos, si modifica módulos existentes y si reutiliza módulos que ya existían
+y que habrá que instalar en producción. Si crea un módulo nuevo, valora si lo que hace podría
+haberse resuelto ampliando uno existente, y si sigue la estructura de los módulos de Datoo
+(nombre datoo_<área>, autor Datoo, licencia LGPL-3, versión 16.0.x.y.z, carpetas models, views,
+security). Después, qué módulos toca y de qué tipo es el cambio: modelo de datos (campos, tablas), permisos y
 reglas de acceso, vistas, informes, lógica de negocio, datos, dependencias.
 
 RIESGOS
@@ -946,6 +1094,7 @@ def review_request(job, sid, base, name, wt):
         prompt = (PROMPT_REVISION
                   + f"\n=== SOLICITUD ===\nTítulo: {sol['title']}\nDescripción: {sol['description']}\n"
                     f"Usuario: {sol['login']}\nMódulos: {', '.join(mods) or 'ninguno'}\nFicheros: {', '.join(files[:200])}\n"
+                  + f"\n=== QUÉ SUPONE ===\n{state_text(json.loads(sol['estado'] or 'null') or request_state(owner, wt))}\n"
                   + f"\n=== RESULTADO DE LA PRUEBA ===\n{result}\n{log[-6000:]}\n"
                   + f"\n=== CAMBIOS (diff contra main) ===\n{diff[:180000]}\n"
                   + ("\n[diff recortado por tamaño]\n" if len(diff) > 180000 else "") + "=== FIN ===\n")
@@ -963,6 +1112,9 @@ def review_request(job, sid, base, name, wt):
         job.log("No hay ningún usuario de Datoo con Claude conectado: el informe lleva solo la prueba.")
     if not report:
         report = f"PRUEBA\n{result}\n\n(Sin informe del agente revisor.)"
+    # El estado va siempre al principio, calculado por el panel y no por el agente.
+    state = json.loads(sol["estado"] or "null") or request_state(owner, wt)
+    report = "QUÉ SUPONE PARA PRODUCCIÓN\n" + state_text(state) + "\n\n" + report
     m = re.findall(r"VEREDICTO:\s*(APTO CON OBSERVACIONES|NO APTO|APTO)", report)
     verdict = m[-1] if m else ("NO APTO" if result.startswith("FALLIDA") else "SIN VEREDICTO")
     sql("UPDATE solicitudes SET report=?, verdict=?, reviewed=? WHERE id=?", (report, verdict, now(), sid))
@@ -1237,6 +1389,7 @@ def restore_from_production(job, target, path=None, u=None):
     drop_database(tmp)
     job.log("Restaurando la copia, neutralizada...")
     restore_neutralized(job, tmp, path)
+    baseline = installed_modules(tmp)  # lo que tiene instalado producción
     if target in db_names():
         job.log(f"Sustituyendo {target} por la copia nueva...")
         odoo_db("/web/database/drop", dict(name=target))
@@ -1266,6 +1419,8 @@ def restore_from_production(job, target, path=None, u=None):
     else:
         job.log("Ninguno de los módulos instalados difiere del código de producción: no hay nada que actualizar.")
     odoo_restart(job)
+    sql("INSERT OR REPLACE INTO lineas_base (db,modules,fecha) VALUES (?,?,?)",
+        (target, json.dumps(sorted(baseline)), now()))
     job.log(f"{target} es ahora una copia de producción con los cambios de desarrollo aplicados.")
 
 
@@ -1801,8 +1956,13 @@ def requests_page():
         commits = [c for c in commits if c["email"] in emails]
     for c in commits:
         c["mine"] = c["email"] == mine
-    reqs = [r for r in sql("SELECT * FROM solicitudes ORDER BY id DESC LIMIT 300") if r["login"] in logins][:100]
-    return render_template("solicitudes.html", commits=commits, dirty=dirty, error=error, reqs=reqs,
+    reqs = [dict(r, st=json.loads(r["estado"] or "null") or {})
+            for r in sql("SELECT * FROM solicitudes ORDER BY id DESC LIMIT 300") if r["login"] in logins][:100]
+    try:
+        reused = reused_modules(g.user)
+    except Exception:
+        reused = {}
+    return render_template("solicitudes.html", commits=commits, dirty=dirty, error=error, reqs=reqs, reused=reused,
                            branch=DEV_BRANCH, has_token=bool(GITHUB_TOKEN))
 
 
@@ -1811,8 +1971,16 @@ def request_create():
     title = request.form.get("title", "").strip()[:120]
     description = request.form.get("description", "").strip()[:4000]
     shas = [x for x in request.form.getlist("sha") if SHA_RE.match(x)]
-    if not title or not shas:
-        flash("Indica un título y marca al menos un commit.", "error")
+    if not title:
+        flash("Indica un título para la solicitud.", "error")
+        return redirect(url_for("panel.requests_page"))
+    if not shas:  # sin código: instalar en producción módulos que ya existen
+        try:
+            create_install_request(dict(g.user), title, description)
+            audit(session["user"], f"Solicitar instalación en producción: {title}", result="correcto")
+            flash("Solicitud de instalación registrada.", "ok")
+        except Exception as e:
+            flash(str(e), "error")
         return redirect(url_for("panel.requests_page"))
     allowed = {c["sha"] for c in pending_commits()
                if not c["asked"] and (es_datoo() or c["email"] == g.user["email"].lower())}
@@ -1830,7 +1998,7 @@ def request_view(sid):
     sol = sql("SELECT * FROM solicitudes WHERE id=?", (sid,), one=True) or abort(404)
     if sol["login"] not in {r["login"] for r in peers()}:
         abort(404)
-    return render_template("informe.html", s=sol)
+    return render_template("informe.html", s=sol, st=json.loads(sol["estado"] or "null") or {})
 
 
 @bp.route("/solicitudes/revisar", methods=["POST"])
@@ -1855,8 +2023,15 @@ def request_status():
     status = request.form.get("status", "")
     if status not in ("pendiente", "en producción", "rechazada"):
         abort(400)
+    sol = sql("SELECT * FROM solicitudes WHERE id=?", (request.form.get("id", type=int),), one=True) or abort(404)
     sql("UPDATE solicitudes SET status=?, note=? WHERE id=?",
-        (status, request.form.get("note", "").strip()[:500], request.form.get("id", type=int)))
+        (status, request.form.get("note", "").strip()[:500], sol["id"]))
+    if status == "en producción":  # lo reutilizado ya está en producción: deja de contar como pendiente
+        for db, items in ((json.loads(sol["estado"] or "null") or {}).get("reutilizados") or {}).items():
+            row = sql("SELECT modules FROM lineas_base WHERE db=?", (db,), one=True)
+            if row:
+                merged = sorted(set(json.loads(row["modules"])) | {i["name"] for i in items})
+                sql("UPDATE lineas_base SET modules=? WHERE db=?", (json.dumps(merged), db))
     audit(session["user"], f"Solicitud {request.form.get('id')} marcada como {status}", result="correcto")
     return redirect(url_for("panel.requests_page"))
 
@@ -2041,6 +2216,12 @@ def api_pending():
     if dirty:
         lines += [f"Ficheros con cambios sin confirmar en la carpeta común ({len(dirty)}), que no se pueden solicitar:"]
         lines += [f"  {f}" for f in dirty[:40]]
+    try:
+        for db, items in reused_modules(g.user).items():
+            lines.append(f"Módulos existentes instalados en {db} que producción no tiene (se pueden solicitar):")
+            lines += [f"  {i['name']} ({i['origen']})" for i in items]
+    except Exception:
+        pass
     return jsonify(texto="\n".join(lines))
 
 
@@ -2058,9 +2239,17 @@ def api_request():
     allowed = {c["sha"]: c for c in commits}
     wanted = [str(x) for x in data.get("commits") or []]
     shas = [sha for sha in allowed if not wanted or any(sha.startswith(w) and len(w) >= 7 for w in wanted)]
-    if not shas or (wanted and len(shas) != len(wanted)):
-        return jsonify(error="No hay commits tuyos pendientes que solicitar, o alguno de los indicados "
-                             "no es tuyo o ya está solicitado. Consulta «entorno pendientes»."), 400
+    if wanted and len(shas) != len(wanted):
+        return jsonify(error="Alguno de los commits indicados no es tuyo o ya está solicitado. "
+                             "Consulta «entorno pendientes»."), 400
+    if not shas:  # sin código: instalar en producción módulos que ya existen
+        try:
+            create_install_request(dict(g.user), title, description)
+        except Exception as e:
+            return jsonify(error=str(e)), 400
+        audit(g.user["login"], f"Solicitar instalación en producción: {title}", result="correcto")
+        return jsonify(hecho="Solicitud de instalación registrada: no lleva código, pide a Datoo instalar "
+                             "en producción los módulos existentes que has reutilizado.")
     user = dict(g.user)
     job = start_job(f"Solicitar paso a producción: {title}",
                     lambda job: create_request(job, user, title, description, shas), user=user["login"])
