@@ -35,12 +35,13 @@
   </details>
   {% endif %}
   <details>
-    <summary>Instalar o actualizar módulos</summary>
+    <summary>Instalar, actualizar o desinstalar módulos</summary>
     <form method="post" action="{{ url_for('panel.db_modules') }}" class="row">
       <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="name" value="{{ d.name }}">
-      <select name="mode"><option value="actualizar">Actualizar</option><option value="instalar">Instalar</option></select>
+      <select name="mode"><option value="actualizar">Actualizar</option><option value="instalar">Instalar</option><option value="desinstalar">Desinstalar</option></select>
       <input type="text" name="modules" placeholder="modulo_uno,modulo_dos" required style="flex:1">
       <label><input type="checkbox" name="restart" checked> Reiniciar Odoo al terminar</label>
+      <label><input type="checkbox" name="confirm_deps"> Al desinstalar, incluir los módulos que dependen de ellos</label>
       <button class="primary">Ejecutar</button>
     </form>
   </details>

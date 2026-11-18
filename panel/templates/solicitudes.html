@@ -1,7 +1,7 @@
 {% extends "base.html" %}{% block title %}Solicitudes{% endblock %}
 {% block body %}
 <h1>Solicitudes de paso a producción</h1>
-<p class="lead">Los cambios de desarrollo siguen funcionando aquí hasta que Datoo los pasa a producción. Cada usuario solicita los suyos.</p>
+<p class="lead">Los cambios de desarrollo siguen funcionando aquí hasta que Datoo los pasa a producción. Cada usuario solicita los suyos. Si Datoo pide cambios («a corregir»), se corrige y se vuelve a solicitar; si descarta un desarrollo, hay que deshacerlo en desarrollo.</p>
 {% if error %}<div class="flash error">No se puede leer el repositorio: {{ error }}</div>{% endif %}
 {% if dirty %}
 <div class="note"><strong>Hay {{ dirty|length }} ficheros con cambios sin confirmar</strong> en la carpeta común (sin contar los ficheros compilados). No tienen autor y no se pueden solicitar: pide a tu asistente que confirme los suyos.
@@ -20,7 +20,7 @@
         <td>{% if can %}<input type="checkbox" name="sha" value="{{ c.sha }}" {{ 'checked' if c.mine }}>{% endif %}</td>
         <td>{{ c.subject }} <span class="mono small muted">{{ c.short }}</span></td>
         <td class="small">{{ c.name }}</td><td class="small">{{ c.date }}</td>
-        <td class="num">{% if c.asked %}<span class="tag warn">Solicitado</span>{% elif c.mine %}<span class="tag ok">Tuyo</span>{% endif %}</td>
+        <td class="num">{% if c.discarded %}<span class="tag err">Descartado: hay que deshacerlo</span>{% elif c.asked %}<span class="tag warn">Solicitado</span>{% elif c.mine %}<span class="tag ok">Tuyo</span>{% endif %}</td>
       </tr>
       {% endfor %}
     </table>
@@ -61,13 +61,17 @@
       <td><strong>{{ r.title }}</strong><br><span class="small muted">{{ r.description }}</span>
           {% if r.note %}<br><span class="small">Nota de Datoo: {{ r.note }}</span>{% endif %}</td>
       <td class="small">{{ r.login }}</td><td class="small">{{ r.created }}</td>
-      <td><span class="tag {{ 'ok' if r.status=='en producción' else 'err' if r.status=='rechazada' else 'warn' }}">{{ r.status }}</span>
+      <td><span class="tag {{ 'ok' if r.status=='en producción' else 'err' if r.status in ('rechazada','descartada') else '' if r.status=='retirada' else 'warn' }}">{{ r.status }}</span>
           {% if r.verdict %}<br><span class="tag {{ 'ok' if r.verdict=='APTO' else 'err' if r.verdict=='NO APTO' else 'warn' }}" style="margin-top:4px">{{ r.verdict }}</span>{% endif %}
           {% if r.st.nuevos %}<br><span class="tag warn" style="margin-top:4px">Módulos nuevos: {{ r.st.nuevos|length }}</span>{% endif %}
           {% if r.st.modificados %}<br><span class="tag" style="margin-top:4px">Modifica: {{ r.st.modificados|length }}</span>{% endif %}
           {% if r.st.reutilizados %}<br><span class="tag" style="margin-top:4px">Instalar en producción: {{ r.st.reutilizados.values()|map('length')|sum }}</span>{% endif %}</td>
       <td class="num">
         <a class="btn" href="{{ url_for('panel.request_view', sid=r.id) }}">Ver informe</a>
+        {% if r.status == 'pendiente' and (es_datoo or r.user_id == me.id) %}
+        <form method="post" action="{{ url_for('panel.request_withdraw') }}" style="display:inline" onsubmit="return confirm('¿Retirar esta solicitud? Sus commits quedan libres para una nueva.')">
+          <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ r.id }}"><button>Retirar</button></form>
+        {% endif %}
         {% if es_datoo and r.branch %}
         <form method="post" action="{{ url_for('panel.request_review') }}" style="display:inline">
           <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ r.id }}"><button>Repetir revisión</button></form>
@@ -76,7 +80,7 @@
         <form method="post" action="{{ url_for('panel.request_status') }}" class="row" style="justify-content:flex-end;margin-top:6px">
           <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ r.id }}">
           <input type="text" name="note" placeholder="Nota para el usuario" value="{{ r.note or '' }}" style="width:170px">
-          <select name="status">{% for st in ['pendiente','en producción','rechazada'] %}<option {{ 'selected' if st==r.status }}>{{ st }}</option>{% endfor %}</select>
+          <select name="status">{% for st in ['pendiente','en producción','a corregir','descartada'] %}<option {{ 'selected' if st==r.status }}>{{ st }}</option>{% endfor %}</select>
           <button>Guardar</button>
         </form>
         {% endif %}

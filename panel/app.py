@@ -77,6 +77,7 @@ TERMINAL_URL = env("TERMINAL_URL", "ws://asistentes:7681/")
 TERMINAL_SECRET = env("TERMINAL_SECRET", "")
 TOOLS = {"claude": "Claude", "codex": "ChatGPT"}
 DBFILE = os.path.join(DATA_DIR, "panel.db")
+ESTADOS = ("pendiente", "en producción", "a corregir", "descartada", "retirada")
 SLOTS = 8                                   # puestos de asistente del contenedor
 ROLE_LABEL = {"cliente": "Cliente", "datoo": "Datoo"}
 LOGIN_RE = re.compile(r"^[a-z][a-z0-9_]{1,19}$")
@@ -559,6 +560,38 @@ Solo cuando la persona te lo pida de forma expresa:
 
 No solicites por tu cuenta, ni cambios sin confirmar o sin probar.
 
+## Si una solicitud no se acepta
+
+`entorno solicitudes` lista tus solicitudes con su estado, el veredicto de la
+revisión automática y la nota de Datoo; `entorno solicitudes <número>` enseña
+el informe completo. Míralo cuando la persona pregunte por una solicitud o
+antes de seguir trabajando sobre algo ya solicitado. Según el caso:
+
+- **Revisión automática «NO APTO»** (la solicitud sigue pendiente): explica a
+  la persona qué falla. Si se corrige, retira la solicitud con
+  `entorno retirar <número>`, corrige, confirma y solicita de nuevo: la nueva
+  solicitud lleva todo junto.
+- **«A corregir»** (Datoo pide cambios): lee su nota y el informe, corrige,
+  confirma y vuelve a solicitar. No discutas el criterio de Datoo con código:
+  si la persona no está de acuerdo, que lo hable con Datoo.
+- **«Descartada»** (Datoo no lo llevará a producción): ese desarrollo no debe
+  quedarse en desarrollo, porque dejaría de parecerse a producción. Díselo a
+  la persona y, con su confirmación, deshazlo: `git revert <commit>` de cada
+  commit de la solicitud, del más reciente al más antiguo (nunca `git reset`
+  ni reescribir historial: la rama es compartida), y desinstala los módulos
+  que se instalaron para él. Después `entorno actualizar` de los módulos
+  afectados.
+
+## Desinstalar módulos
+
+`entorno desinstalar <modulo[,modulo]>` no desinstala nada a la primera:
+muestra el plan, con los módulos que dependen de los pedidos y que Odoo
+desinstalaría también. Enséñale ese plan a la persona, con la lista de
+dependientes, y avísale de que se borran los datos de todos ellos en la base
+de datos de desarrollo. Solo si lo confirma, repite la orden con
+`--confirmar`. No se pueden desinstalar módulos que producción tiene
+instalados: si hay que quitar uno de producción, es Datoo quien decide.
+
 ## Git
 
 - Responde y escribe los mensajes de commit en español.
@@ -716,17 +749,28 @@ def dev_sync(u):
 
 
 def pending_commits():
-    """Commits de desarrollo que todavía no están en main."""
+    """Commits de desarrollo que todavía no están en main.
+
+    Un commit y el que lo revierte se anulan y no se muestran. Los de una
+    solicitud pendiente o descartada no se pueden volver a solicitar."""
     out = git("log", "--cherry-pick", "--right-only", "--no-merges",
               "--format=%H|%an|%ae|%ad|%s", "--date=format:%Y-%m-%d %H:%M", "origin/main...refs/dev/head")
-    asked = set()
-    for r in sql("SELECT commits FROM solicitudes WHERE status='pendiente'"):
-        asked.update(json.loads(r["commits"]))
+    asked, discarded = set(), set()
+    for r in sql("SELECT commits, status FROM solicitudes WHERE status IN ('pendiente','descartada')"):
+        (asked if r["status"] == "pendiente" else discarded).update(json.loads(r["commits"]))
+    undone = set()
+    body = git("log", "--no-merges", "--grep=This reverts commit", "--format=%H %b%x00", "origin/main..refs/dev/head")
+    for entry in body.split("\x00"):
+        m = re.search(r"^\s*([0-9a-f]{40}) .*?This reverts commit ([0-9a-f]{40})", entry, re.S)
+        if m:
+            undone.update(m.groups())
     commits = []
     for line in out.splitlines():
         sha, name, email, date, subject = line.split("|", 4)
-        commits.append(dict(sha=sha, short=sha[:8], name=name, email=email.lower(), date=date,
-                            subject=subject, asked=sha in asked))
+        if sha in undone:
+            continue
+        commits.append(dict(sha=sha, short=sha[:8], name=name, email=email.lower(), date=date, subject=subject,
+                            asked=sha in asked or sha in discarded, discarded=sha in discarded))
     return commits
 
 
@@ -909,6 +953,44 @@ def create_install_request(user, title, description):
                "estado,report,verdict,reviewed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                (user["id"], user["login"], title, description, "[]", "", "pendiente", "", now(),
                 json.dumps(state), report, "SOLO INSTALACIÓN", now()))
+
+
+def withdraw_request(sol, status, user_login):
+    """Cierra una solicitud que no va a pasar tal cual y retira su rama."""
+    sql("UPDATE solicitudes SET status=? WHERE id=?", (status, sol["id"]))
+    if sol["branch"]:
+        try:
+            git_fetch()
+            git("push", "--quiet", "origin", "--delete", sol["branch"], check=False)
+        except Exception:
+            pass
+    audit(user_login, f"Solicitud {sol['id']} ({sol['title']}): {status}", result="correcto")
+
+
+def request_brief(sol):
+    """Una solicitud en texto, para el asistente de quien la hizo."""
+    st = json.loads(sol["estado"] or "null") or {}
+    lines = [f"Solicitud {sol['id']}: {sol['title']}",
+             f"Estado: {sol['status']}" + (f" · Revisión automática: {sol['verdict']}" if sol["verdict"] else ""),
+             f"Fecha: {sol['created']}"]
+    if sol["note"]:
+        lines.append(f"Nota de Datoo: {sol['note']}")
+    commits = json.loads(sol["commits"] or "[]")
+    if commits:
+        lines.append("Commits: " + ", ".join(c[:8] for c in commits))
+    if st.get("nuevos"):
+        lines.append("Módulos nuevos de esta solicitud: " + ", ".join(st["nuevos"]))
+    if sol["status"] == "a corregir":
+        lines.append("Qué hacer: corrige lo que indican la nota y el informe, confirma los cambios y vuelve a "
+                     "solicitar. La nueva solicitud llevará estos commits y los de la corrección.")
+    elif sol["status"] == "descartada":
+        lines.append("Qué hacer: este desarrollo no irá a producción. Tras confirmarlo con la persona, deshazlo en "
+                     "desarrollo: revierte estos commits con «git revert» (no borres historial) y desinstala con "
+                     "«entorno desinstalar» los módulos que se instalaron para él.")
+    elif sol["status"] == "pendiente" and sol["verdict"] == "NO APTO":
+        lines.append("Qué hacer: la revisión automática no la da por buena. Si vas a corregirla, retírala con "
+                     f"«entorno retirar {sol['id']}», corrige y vuelve a solicitar todo junto.")
+    return "\n".join(lines)
 
 
 GH_HEADERS = {"Authorization": f"Bearer {GITHUB_TOKEN}", "Accept": "application/vnd.github+json"}
@@ -1250,6 +1332,61 @@ def pg_tool(job, cmd):
         errors = re.findall(r"ERROR:\s+(.*)", r.stderr)
         if not errors or any('"transaction_timeout"' not in e for e in errors):
             raise RuntimeError("No se han podido cargar los datos: " + r.stderr.strip()[-400:])
+
+
+PROTECTED_MODULES = {"base", "web", "mail", "bus", "base_setup"}
+UNINSTALL_PY = """import sys, odoo
+from odoo import api, SUPERUSER_ID
+odoo.tools.config.parse_config(['--no-http', '--workers=0', '--max-cron-threads=0', '--log-level=warn'])
+db, names = sys.argv[1], sys.argv[2].split(',')
+registry = odoo.registry(db)
+with registry.cursor() as cr:
+    env = api.Environment(cr, SUPERUSER_ID, {})
+    mods = env['ir.module.module'].search([('name', 'in', names), ('state', '=', 'installed')])
+    print('Desinstalando:', ', '.join(sorted(mods.mapped('name'))))
+    mods.button_immediate_uninstall()
+print('Desinstalado.')
+"""
+
+
+def uninstall_plan(db, mods, strict):
+    """Qué supone desinstalar unos módulos: (todos los que caen, dependientes, error).
+
+    Al desinstalar un módulo, Odoo desinstala también los que dependen de él.
+    Con strict (clientes), no se toca nada que esté instalado en producción."""
+    with pg_cursor(db) as cr:
+        cr.execute("SELECT name FROM ir_module_module WHERE state='installed'")
+        installed = {r[0] for r in cr.fetchall()}
+        cr.execute("""SELECT m.name, d.name FROM ir_module_module_dependency d
+                      JOIN ir_module_module m ON m.id = d.module_id WHERE m.state='installed'""")
+        needs = cr.fetchall()
+    missing = sorted(set(mods) - installed)
+    if missing:
+        return [], [], f"No están instalados en {db}: {', '.join(missing)}."
+    closure, grew = set(mods), True
+    while grew:
+        more = {m for m, dep in needs if dep in closure} - closure
+        closure |= more
+        grew = bool(more)
+    dependents = sorted(closure - set(mods))
+    blocked = sorted(closure & PROTECTED_MODULES)
+    if blocked:
+        return sorted(closure), dependents, f"No se pueden desinstalar módulos básicos de Odoo: {', '.join(blocked)}."
+    if strict:
+        row = sql("SELECT modules FROM lineas_base WHERE db=?", (db,), one=True)
+        in_prod = sorted(closure & set(json.loads(row["modules"]))) if row else []
+        if in_prod:
+            return sorted(closure), dependents, (
+                f"Estos módulos están instalados en producción y no se desinstalan desde desarrollo: "
+                f"{', '.join(in_prod)}. Si hay que quitarlos de producción, pídeselo a Datoo.")
+    return sorted(closure), dependents, ""
+
+
+def uninstall_modules(job, db, mods):
+    """Desinstala módulos (y los que dependen de ellos) y reinicia Odoo."""
+    job.log("Al desinstalar se borran los datos, campos y vistas de esos módulos en " + db + ".")
+    stream_exec(job, ODOO_CONTAINER, ["python3", "-c", UNINSTALL_PY, db, ",".join(mods)], "odoo", "/")
+    odoo_restart(job)
 
 
 def restore_neutralized(job, name, path):
@@ -1741,6 +1878,24 @@ def db_modules():
     mode = "-i" if request.form.get("mode") == "instalar" else "-u"
     if not name:
         return redirect(url_for("panel.bases"))
+    if request.form.get("mode") == "desinstalar":
+        if name not in user_dbs():
+            abort(403)
+        if not MODS_RE.match(mods) or mods == "all":
+            flash("Indica los módulos a desinstalar por su nombre técnico, separados por comas.", "error")
+            return redirect(url_for("panel.bases"))
+        wanted = mods.split(",")
+        closure, dependents, error = uninstall_plan(name, wanted, strict=not es_datoo())
+        if error:
+            flash(error, "error")
+            return redirect(url_for("panel.bases"))
+        if dependents and request.form.get("confirm_deps") != "on":
+            flash(f"Desinstalar {mods} desinstala también los módulos que dependen de ellos: "
+                  f"{', '.join(dependents)}. Se borran sus datos. Si es lo que quieres, marca la casilla "
+                  "de confirmación y repite.", "error")
+            return redirect(url_for("panel.bases"))
+        return job_redirect(start_job(f"Desinstalar {', '.join(closure)} en {name}",
+                                      lambda job: uninstall_modules(job, name, closure)), url_for("panel.bases"))
     if name not in user_dbs():
         abort(403)
     if not MODS_RE.match(mods):
@@ -2017,15 +2172,33 @@ def request_review():
     return job_redirect(start_job(f"Revisar la solicitud: {sol['title']}", run), url_for("panel.requests_page"))
 
 
+@bp.route("/solicitudes/retirar", methods=["POST"])
+def request_withdraw():
+    sol = sql("SELECT * FROM solicitudes WHERE id=?", (request.form.get("id", type=int),), one=True) or abort(404)
+    if not es_datoo() and sol["user_id"] != g.user["id"]:
+        abort(403)
+    if sol["status"] != "pendiente":
+        flash("Solo se puede retirar una solicitud pendiente.", "error")
+    else:
+        withdraw_request(sol, "retirada", session["user"])
+        flash("Solicitud retirada. Sus commits vuelven a estar disponibles para una nueva solicitud.", "ok")
+    return redirect(url_for("panel.requests_page"))
+
+
 @bp.route("/solicitudes/estado", methods=["POST"])
 @solo_datoo
 def request_status():
     status = request.form.get("status", "")
-    if status not in ("pendiente", "en producción", "rechazada"):
+    if status not in ESTADOS:
         abort(400)
     sol = sql("SELECT * FROM solicitudes WHERE id=?", (request.form.get("id", type=int),), one=True) or abort(404)
     sql("UPDATE solicitudes SET status=?, note=? WHERE id=?",
         (status, request.form.get("note", "").strip()[:500], sol["id"]))
+    if status in ("a corregir", "descartada", "retirada") and sol["branch"]:
+        try:  # esa rama ya no se va a mergear tal cual
+            git("push", "--quiet", "origin", "--delete", sol["branch"], check=False)
+        except Exception:
+            pass
     if status == "en producción":  # lo reutilizado ya está en producción: deja de contar como pendiente
         for db, items in ((json.loads(sol["estado"] or "null") or {}).get("reutilizados") or {}).items():
             row = sql("SELECT modules FROM lineas_base WHERE db=?", (db,), one=True)
@@ -2256,6 +2429,62 @@ def api_request():
     if not job:
         return jsonify(error="Hay otra operación en curso en el entorno."), 409
     return jsonify(tarea=job.id)
+
+
+@bp.route("/api/asistente/desinstalar", methods=["POST"])
+def api_uninstall():
+    data = request.get_json(silent=True) or {}
+    mods = str(data.get("modulos", "")).replace(" ", "").strip(",").lower()
+    if not MODS_RE.match(mods) or mods == "all":
+        return jsonify(error="Indica los módulos por su nombre técnico, separados por comas."), 400
+    db, error = api_db(data)
+    if error:
+        return jsonify(error=error), 400
+    closure, dependents, error = uninstall_plan(db, mods.split(","), strict=not es_datoo())
+    if error:
+        return jsonify(error=error), 400
+    if not data.get("confirmar"):
+        text = [f"Plan de desinstalación en {db} (todavía no se ha hecho nada):",
+                f"  Módulos pedidos: {mods.replace(',', ', ')}"]
+        if dependents:
+            text.append(f"  También se desinstalarán, porque dependen de ellos: {', '.join(dependents)}")
+        else:
+            text.append("  Ningún otro módulo instalado depende de ellos.")
+        text += ["  Se borran los datos, campos y vistas de todos esos módulos en esta base de datos.",
+                 "Explícaselo a la persona, con la lista de módulos dependientes. Si lo confirma, repite la "
+                 "orden añadiendo --confirmar."]
+        return jsonify(hecho="\n".join(text))
+    return api_job(f"Desinstalar {', '.join(closure)} en {db} (asistente)",
+                   lambda job: uninstall_modules(job, db, closure))
+
+
+@bp.route("/api/asistente/solicitudes")
+def api_requests():
+    sid = request.args.get("id", type=int)
+    if sid:
+        sol = sql("SELECT * FROM solicitudes WHERE id=? AND user_id=?", (sid, g.user["id"]), one=True)
+        if not sol:
+            return jsonify(error="No tienes ninguna solicitud con ese número."), 404
+        return jsonify(texto=request_brief(sol) + "\n\nINFORME\n" + (sol["report"] or "Todavía no hay informe."))
+    rows = sql("SELECT * FROM solicitudes WHERE user_id=? ORDER BY id DESC LIMIT 15", (g.user["id"],))
+    if not rows:
+        return jsonify(texto="No has hecho ninguna solicitud.")
+    return jsonify(texto="\n\n".join(request_brief(r) for r in rows)
+                   + "\n\nPara ver el informe completo de una: entorno solicitudes <número>")
+
+
+@bp.route("/api/asistente/retirar", methods=["POST"])
+def api_withdraw():
+    data = request.get_json(silent=True) or {}
+    sol = sql("SELECT * FROM solicitudes WHERE id=? AND user_id=?",
+              (data.get("id") if isinstance(data.get("id"), int) else -1, g.user["id"]), one=True)
+    if not sol:
+        return jsonify(error="No tienes ninguna solicitud con ese número."), 404
+    if sol["status"] != "pendiente":
+        return jsonify(error=f"La solicitud {sol['id']} está «{sol['status']}»: solo se retiran las pendientes."), 400
+    withdraw_request(sol, "retirada", g.user["login"])
+    return jsonify(hecho=f"Solicitud {sol['id']} retirada. Sus commits vuelven a estar disponibles: corrige, "
+                         "confirma y solicita de nuevo todo junto.")
 
 
 @bp.route("/api/asistente/tarea/<jid>")

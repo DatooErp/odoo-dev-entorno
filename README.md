@@ -93,6 +93,25 @@ tiene. Para esto último guarda, en cada restauración desde producción, la
 lista de módulos instalados. Si no hay código y solo se ha reutilizado un
 módulo existente, la solicitud es de instalación: no lleva rama.
 
+**Cuando una solicitud no se acepta.** Nada se borra solo: el rechazo llega al
+usuario y a su asistente, que actúa de forma guiada.
+
+| Estado | Quién lo pone | Qué hace el asistente |
+|---|---|---|
+| pendiente con revisión «NO APTO» | el agente revisor | retira la solicitud, corrige y vuelve a solicitar todo junto |
+| a corregir | Datoo, con una nota | corrige según la nota y el informe y vuelve a solicitar |
+| descartada | Datoo, con una nota | con el visto bueno del usuario, revierte sus commits (`git revert`) y desinstala lo que instaló |
+| retirada | el usuario o su asistente | sus commits quedan libres para otra solicitud |
+
+Al pasar a «a corregir», «descartada» o «retirada» se borra la rama de la
+solicitud en GitHub. Los commits de una solicitud descartada no se pueden
+volver a solicitar; un commit y el que lo revierte dejan de mostrarse.
+
+**Desinstalar módulos** va en dos pasos: primero el plan, con los módulos que
+dependen de los pedidos y que Odoo desinstalaría también, y después la
+confirmación. Un cliente no puede desinstalar módulos que producción tiene
+instalados.
+
 **Compilación de los frontends.** Si la solicitud toca el `frontend/` de un
 módulo React, el panel lo compila (`npm ci && npm run build`) sobre `main` más
 la solicitud y añade el resultado en un commit propio. La compilación se
@@ -136,7 +155,10 @@ Los asistentes aplican ellos mismos lo que desarrollan, sin acceso a Docker:
 | `entorno reiniciar` | reinicia Odoo |
 | `entorno registro [líneas]` | final del registro de Odoo |
 | `entorno estado` | estado de Odoo y de la base de datos |
+| `entorno desinstalar <módulos>` | muestra qué se desinstalaría, con los módulos dependientes; con `--confirmar`, lo hace |
 | `entorno pendientes` | commits del usuario aún sin solicitar |
+| `entorno solicitudes [número]` | sus solicitudes: estado, nota de Datoo e informe |
+| `entorno retirar <número>` | retira una solicitud pendiente para rehacerla |
 | `entorno solicitar "<título>" "<descripción>"` | solicita el paso a producción de esos commits |
 
 La orden llama al panel con una credencial propia de cada puesto

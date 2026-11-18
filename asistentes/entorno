@@ -16,12 +16,16 @@ USO = """Uso:
   entorno actualizar <modulo[,modulo...]>   actualiza módulos y reinicia Odoo
   entorno instalar <modulo[,modulo...]>     instala módulos y reinicia Odoo
                                             (con varias bases de datos: --bd <nombre>)
+  entorno desinstalar <modulo[,modulo...]>  muestra qué se desinstalaría, con los
+                                            módulos dependientes; con --confirmar, lo hace
   entorno reiniciar                         reinicia Odoo (cambios solo de Python)
   entorno registro [lineas]                 últimas líneas del registro de Odoo
   entorno estado                            estado de Odoo y tus bases de datos
   entorno pendientes                        tus commits aún sin solicitar
   entorno solicitar "<título>" ["<descripción>"] [--commits sha,sha]
                                             solicita el paso a producción
+  entorno solicitudes [número]              tus solicitudes: estado, nota de Datoo, informe
+  entorno retirar <número>                  retira una solicitud pendiente para rehacerla
 
 Los cambios de un frontend React no necesitan nada de esto: se compilan con
 «npm run build» en la carpeta frontend del módulo y se ven al recargar."""
@@ -87,6 +91,24 @@ def main():
             bd = args[i + 1] if i + 1 < len(args) else ""
             args = args[:i] + args[i + 2:]
         run(args[0], {"modulos": args[1], "bd": bd})
+    elif args[0] == "desinstalar" and len(args) >= 2:
+        rest, confirm, bd = args[1:], False, ""
+        if "--confirmar" in rest:
+            confirm = True
+            rest.remove("--confirmar")
+        if "--bd" in rest:
+            i = rest.index("--bd")
+            bd = "".join(rest[i + 1:i + 2])
+            rest = rest[:i] + rest[i + 2:]
+        if len(rest) != 1:
+            sys.exit(USO)
+        run("desinstalar", {"modulos": rest[0], "bd": bd, "confirmar": confirm})
+    elif args[0] == "retirar" and len(args) == 2 and args[1].isdigit():
+        run("retirar", {"id": int(args[1])})
+    elif args[0] == "solicitudes" and len(args) <= 2:
+        status, body = call("solicitudes" + (f"?id={args[1]}" if len(args) == 2 and args[1].isdigit() else ""))
+        print(body.get("texto") or body.get("error", f"Error {status}"))
+        sys.exit(0 if status == 200 else 1)
     elif args[0] == "reiniciar" and len(args) == 1:
         run("reiniciar", {})
     elif args[0] == "registro" and len(args) <= 2:

@@ -2,10 +2,12 @@
 {% block body %}
 <h1>{{ s.title }}</h1>
 <p class="lead">Solicitud de {{ s.login }} · {{ s.created }} ·
-  <span class="tag {{ 'ok' if s.status=='en producción' else 'err' if s.status=='rechazada' else 'warn' }}">{{ s.status }}</span>
+  <span class="tag {{ 'ok' if s.status=='en producción' else 'err' if s.status in ('rechazada','descartada') else '' if s.status=='retirada' else 'warn' }}">{{ s.status }}</span>
   {% if s.verdict %}<span class="tag {{ 'ok' if s.verdict=='APTO' else 'err' if s.verdict=='NO APTO' else 'warn' }}">Revisión: {{ s.verdict }}</span>{% endif %}</p>
 {% if s.description %}<div class="card"><h2>Descripción</h2><p style="white-space:pre-wrap;margin:0">{{ s.description }}</p></div>{% endif %}
 {% if s.note %}<div class="note">Nota de Datoo: {{ s.note }}</div>{% endif %}
+{% if s.status == 'a corregir' %}<div class="note"><strong>Datoo pide cambios.</strong> Pide a tu asistente que corrija lo que indican la nota y el informe y que vuelva a solicitar; la nueva solicitud llevará estos cambios y la corrección.</div>{% endif %}
+{% if s.status == 'descartada' %}<div class="note"><strong>Este desarrollo no irá a producción.</strong> Para que desarrollo siga pareciéndose a producción hay que deshacerlo aquí: pide a tu asistente que revierta sus cambios y desinstale los módulos que instaló para él.</div>{% endif %}
 {% if st %}
 <div class="card">
   <h2>Qué supone para producción</h2>
