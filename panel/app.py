@@ -1020,7 +1020,11 @@ def pg_tool(job, cmd):
     r = subprocess.run(cmd + ["-h", PG["host"], "-p", str(PG["port"]), "-U", PG["user"]],
                        env=dict(os.environ, PGPASSWORD=PG["password"]), capture_output=True, text=True, timeout=7200)
     if r.returncode:
-        raise RuntimeError("No se han podido cargar los datos: " + r.stderr.strip()[-400:])
+        # El cliente de PostgreSQL del panel es más nuevo que el servidor y envía un
+        # ajuste que este no conoce; es inocuo. Cualquier otro error sí es un fallo.
+        errors = re.findall(r"ERROR:\s+(.*)", r.stderr)
+        if not errors or any('"transaction_timeout"' not in e for e in errors):
+            raise RuntimeError("No se han podido cargar los datos: " + r.stderr.strip()[-400:])
 
 
 def restore_neutralized(job, name, path):
