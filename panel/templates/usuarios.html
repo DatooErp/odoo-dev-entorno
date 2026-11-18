@@ -7,7 +7,8 @@
   <form method="post" action="{{ url_for('panel.user_create') }}" class="row">
     <input type="hidden" name="_csrf" value="{{ csrf }}">
     <input type="text" name="login" placeholder="usuario" pattern="[a-z][a-z0-9_]{1,19}" required style="width:130px">
-    <input type="text" name="name" placeholder="Nombre y apellidos" required>
+    <input type="text" name="first" placeholder="Nombre" required maxlength="40">
+    <input type="text" name="last" placeholder="Apellidos (opcional)" maxlength="60">
     <input type="email" name="email" placeholder="correo@empresa.com" required>
     <select name="role"><option value="cliente">Cliente</option><option value="datoo">Datoo</option></select>
     <input type="password" name="password" placeholder="Contraseña (en blanco: se genera)" minlength="8" autocomplete="new-password">
@@ -15,14 +16,21 @@
       {% for d in all_dbs %}<label style="margin-right:12px;white-space:nowrap"><input type="checkbox" name="dbs" value="{{ d }}"> <span class="mono">{{ d }}</span></label>{% else %}<span class="muted">no hay ninguna todavía</span>{% endfor %}</div>
     <button class="primary">Crear</button>
   </form>
-  <p class="small muted">El nombre y el correo son la firma con la que quedan registrados sus cambios. La contraseña la puedes escribir tú (mínimo 8 caracteres); si la dejas en blanco, se genera y se muestra una sola vez. Un cliente solo ve sus bases de datos y la actividad de quienes las comparten; Datoo las ve todas.</p>
+  <p class="small muted">El nombre completo (nombre y, si los pones, apellidos) y el correo son la firma con la que quedan registrados sus cambios, y lo que el usuario ve en el panel. La contraseña la puedes escribir tú (mínimo 8 caracteres); si la dejas en blanco, se genera y se muestra una sola vez. Un cliente solo ve sus bases de datos y la actividad de quienes las comparten; Datoo las ve todas.</p>
 </div>
 <div class="card">
   <table>
-    <tr><th>Usuario</th><th>Nombre</th><th>Correo</th><th>Perfil</th><th>Puesto</th><th>Bases de datos</th><th></th></tr>
+    <tr><th>Usuario</th><th>Nombre y apellidos</th><th>Correo</th><th>Perfil</th><th>Puesto</th><th>Bases de datos</th><th></th></tr>
     {% for u in users %}
     <tr>
-      <td class="mono">{{ u.login }}</td><td>{{ u.name }}</td><td class="small">{{ u.email }}</td>
+      <td class="mono">{{ u.login }}</td><td>{{ u.name }}
+        {% if u.active %}<details><summary class="small">Editar</summary>
+          <form method="post" action="{{ url_for('panel.user_rename') }}" style="display:grid;gap:6px;min-width:150px">
+            <input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ u.id }}">
+            <input type="text" name="first" placeholder="Nombre" value="{{ u.first or u.name }}" required maxlength="40">
+            <input type="text" name="last" placeholder="Apellidos (opcional)" value="{{ u.last or '' }}" maxlength="60">
+            <button>Guardar</button>
+          </form></details>{% endif %}</td><td class="small">{{ u.email }}</td>
       <td class="small">{{ 'Datoo' if u.role == 'datoo' else 'Cliente' }}</td>
       <td class="small">{% if not u.active %}<span class="tag">Baja</span>{% elif u.slot %}Puesto {{ u.slot }}{% else %}Sin puesto{% endif %}</td>
       <td class="small">{% if u.role == 'datoo' %}Todas{% elif u.active %}

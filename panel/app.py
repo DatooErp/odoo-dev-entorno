@@ -169,6 +169,10 @@ def init_db():
     ucols = {r["name"] for r in sql("PRAGMA table_info(users)")}
     if "api_hash" not in ucols:
         sql("ALTER TABLE users ADD COLUMN api_hash TEXT")
+    if "first" not in ucols:  # nombre y apellidos por separado; name es el nombre completo
+        sql("ALTER TABLE users ADD COLUMN first TEXT")
+        sql("ALTER TABLE users ADD COLUMN last TEXT")
+        sql("UPDATE users SET first=name, last=''")
     if "dbs" not in ucols:  # dominio de bases de datos de cada usuario
         sql("ALTER TABLE users ADD COLUMN dbs TEXT")
         if DEV_DB:
@@ -2244,6 +2248,14 @@ def users_page():
                            slots=SLOTS, all_dbs=sorted(known_dbs()))
 
 
+def form_name():
+    """Nombre (obligatorio) y apellidos (opcionales) de un formulario:
+    (nombre, apellidos, nombre completo)."""
+    first = " ".join(request.form.get("first", "").split())[:40]
+    last = " ".join(request.form.get("last", "").split())[:60]
+    return first, last, f"{first} {last}".strip()
+
+
 def form_password():
     """Contraseña que escribe Datoo, o una generada si la deja en blanco.
     Devuelve (contraseña, generada, error)."""
@@ -2276,10 +2288,10 @@ def user_dbs_update():
 @solo_datoo
 def user_create():
     login = request.form.get("login", "").strip().lower()
-    name = request.form.get("name", "").strip()[:60]
+    first, last, name = form_name()
     email = request.form.get("email", "").strip().lower()[:120]
     role = "datoo" if request.form.get("role") == "datoo" else "cliente"
-    if not LOGIN_RE.match(login) or not name or not EMAIL_RE.match(email):
+    if not LOGIN_RE.match(login) or not first or not EMAIL_RE.match(email):
         flash("Revisa los datos: usuario en minúsculas sin espacios, nombre y un correo válido.", "error")
         return redirect(url_for("panel.users_page"))
     if sql("SELECT 1 FROM users WHERE login=? OR (email=? AND active=1)", (login, email), one=True):
@@ -2290,8 +2302,9 @@ def user_create():
         flash(error, "error")
         return redirect(url_for("panel.users_page"))
     slot = free_slot()
-    uid = sql("INSERT INTO users (login,name,email,pwhash,role,slot,created,dbs) VALUES (?,?,?,?,?,?,?,?)",
-              (login, name, email, generate_password_hash(password), role, slot, now(), form_dbs()))
+    uid = sql("INSERT INTO users (login,name,first,last,email,pwhash,role,slot,created,dbs) "
+              "VALUES (?,?,?,?,?,?,?,?,?,?)",
+              (login, name, first, last, email, generate_password_hash(password), role, slot, now(), form_dbs()))
     audit(session["user"], f"Crear usuario {login} ({role})", result="correcto")
     msg = (f"Usuario {login} creado. Contraseña: {password} (solo se muestra ahora)." if generated
            else f"Usuario {login} creado con la contraseña indicada.")
@@ -2302,6 +2315,27 @@ def user_create():
             msg += f" No se pudo preparar su puesto de asistente: {e}"
     else:
         msg += f" No quedan puestos de asistente libres (máximo {SLOTS})."
+    flash(msg, "ok")
+    return redirect(url_for("panel.users_page"))
+
+
+@bp.route("/usuarios/nombre", methods=["POST"])
+@solo_datoo
+def user_rename():
+    row = sql("SELECT * FROM users WHERE id=?", (request.form.get("id", type=int),), one=True) or abort(404)
+    first, last, name = form_name()
+    if not first:
+        flash("El nombre es obligatorio; los apellidos, opcionales.", "error")
+        return redirect(url_for("panel.users_page"))
+    sql("UPDATE users SET name=?, first=?, last=? WHERE id=?", (name, first, last, row["id"]))
+    audit(session["user"], f"Nombre de {row['login']}: {name}", result="correcto")
+    msg = f"{row['login']} se llama ahora {name}."
+    if row["active"] and row["slot"]:
+        try:  # su firma de git y el nombre de su sesión de asistente
+            preparar_puesto(sql("SELECT * FROM users WHERE id=?", (row["id"],), one=True))
+            msg += " Sus próximos cambios irán firmados con ese nombre."
+        except Exception as e:
+            msg += f" No se pudo actualizar su puesto de asistente: {e}"
     flash(msg, "ok")
     return redirect(url_for("panel.users_page"))
 
