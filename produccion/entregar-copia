@@ -1,0 +1,32 @@
+#!/bin/sh
+# Entrega de copias al entorno de desarrollo. Se instala en el servidor de
+# PRODUCCIÓN y es lo único que puede ejecutar la clave del entorno:
+#
+#   ~/.ssh/authorized_keys:
+#     restrict,from="<IP del entorno>",command="/usr/local/sbin/entregar-copia" ssh-ed25519 AAAA... odoo-dev
+#
+# Órdenes admitidas (llegan en SSH_ORIGINAL_COMMAND):
+#   <base de datos>   volcado de PostgreSQL de esa base de datos, sin adjuntos,
+#                     solo si figura en /etc/datoo-copias-permitidas
+#   commit            commit de datoov16 que tiene desplegado producción
+#
+# No modifica nada en producción.
+set -eu
+PG_CONTAINER=${PG_CONTAINER:-pgdb16}
+REPO=${REPO:-/home/docker-odoo-dev-datoo-16/datoov16}
+PERMITIDAS=/etc/datoo-copias-permitidas
+orden=${SSH_ORIGINAL_COMMAND:-}
+
+case "$orden" in
+  commit)
+    cat "$REPO/.git/$(sed -n 's/^ref: //p' "$REPO/.git/HEAD")" 2>/dev/null || cat "$REPO/.git/HEAD"
+    ;;
+  *[!a-z0-9_]*|"")
+    echo "Orden no admitida." >&2; exit 2
+    ;;
+  *)
+    grep -qxF "$orden" "$PERMITIDAS" 2>/dev/null || { echo "Base de datos no permitida." >&2; exit 3; }
+    usuario=$(docker exec "$PG_CONTAINER" printenv POSTGRES_USER)
+    exec docker exec "$PG_CONTAINER" pg_dump -U "$usuario" -Fc --no-owner "$orden"
+    ;;
+esac

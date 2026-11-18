@@ -616,9 +616,9 @@ def dirty_files(u):
     return [f for f in worktree_changes(u) if not is_build(f)][:200]
 
 
-def changed_modules(u):
-    """Módulos que desarrollo tiene distintos de main, confirmados o no."""
-    files = git("diff", "--name-only", "origin/main", "refs/dev/head").splitlines() + worktree_changes(u)
+def changed_modules(u, base="origin/main"):
+    """Módulos que desarrollo tiene distintos de base, confirmados o no."""
+    files = git("diff", "--name-only", base, "refs/dev/head").splitlines() + worktree_changes(u)
     mods = {f.split("/", 1)[0] for f in files if "/" in f and "/node_modules/" not in f}
     return sorted(m for m in mods if os.path.isfile(os.path.join(REPO, m, "__manifest__.py")))
 
@@ -1003,6 +1003,12 @@ def restore_neutralized(job, name, path):
             f"{name} está restaurada y neutralizada, pero Odoo no puede abrirla: suele faltar un "
             f"módulo o una librería en el entorno. Revisa el registro de Odoo. ({e})")
     extra_neutralize(job, name)
+    with open(path, "rb") as f:
+        without_files = f.read(5) == b"PGDMP"
+    if without_files:  # volcado sin adjuntos: Odoo regenera sus hojas de estilo y scripts
+        with pg(name) as c, c.cursor() as cr:
+            cr.execute("DELETE FROM ir_attachment WHERE url LIKE '/web/assets/%'")
+        job.log("Copia sin adjuntos: faltarán documentos e imágenes; las pantallas funcionan.")
 
 
 def installed_modules(name):
@@ -1014,24 +1020,42 @@ def installed_modules(name):
         return set()
 
 
+def source_ssh(command, stdout, timeout):
+    return subprocess.run(
+        ["ssh", "-i", f"{KEYS}/origen", "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
+         "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={KEYS}/known_hosts",
+         SOURCE_SSH, command], stdout=stdout, stderr=subprocess.PIPE, timeout=timeout)
+
+
+def source_commit():
+    """Commit de datoov16 desplegado en producción, si se puede saber."""
+    if not (SOURCE_SSH and SOURCE_DB):
+        return ""
+    try:
+        r = source_ssh("commit", subprocess.PIPE, 30)
+        sha = r.stdout.decode().strip()
+        return sha if SHA_RE.match(sha) else ""
+    except Exception:
+        return ""
+
+
 def fetch_source(job):
     """Trae la copia de producción. Devuelve la ruta del fichero."""
     folder = os.path.join(BACKUP_DIR, "origen")
     os.makedirs(folder, exist_ok=True)
     if SOURCE_SSH and SOURCE_DB:
-        dest = os.path.join(folder, f"{SOURCE_DB}_{datetime.datetime.now():%Y%m%d_%H%M%S}.zip")
-        job.log(f"Pidiendo a producción la copia de {SOURCE_DB}...")
+        dest = os.path.join(folder, f"{SOURCE_DB}_{datetime.datetime.now():%Y%m%d_%H%M%S}.dump")
+        job.log(f"Pidiendo a producción la copia de {SOURCE_DB} (sin adjuntos)...")
         with open(dest + ".tmp", "wb") as f:
-            r = subprocess.run(
-                ["ssh", "-i", f"{KEYS}/origen", "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
-                 "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={KEYS}/known_hosts",
-                 SOURCE_SSH, SOURCE_DB], stdout=f, stderr=subprocess.PIPE, timeout=7200)
-        if r.returncode or os.path.getsize(dest + ".tmp") < 1000:
+            r = source_ssh(SOURCE_DB, f, 7200)
+        with open(dest + ".tmp", "rb") as f:
+            magic = f.read(5)
+        if r.returncode or magic != b"PGDMP":
             os.remove(dest + ".tmp")
             raise RuntimeError("Producción no ha entregado la copia: "
-                               + r.stderr.decode("utf-8", "replace").strip()[-300:])
+                               + (r.stderr.decode("utf-8", "replace").strip()[-300:] or "respuesta inesperada"))
         os.replace(dest + ".tmp", dest)
-        for old in sorted(f for f in os.listdir(folder) if f.startswith(SOURCE_DB + "_"))[:-2]:
+        for old in sorted(f for f in os.listdir(folder) if f.startswith(SOURCE_DB + "_"))[:-1]:
             os.remove(os.path.join(folder, old))
         job.log(f"Copia recibida ({human(os.path.getsize(dest))}).")
         return dest
@@ -1064,7 +1088,15 @@ def restore_from_production(job, path=None, u=None):
     # Lo que desarrollo tiene distinto de producción hay que volver a aplicarlo.
     git_fetch()
     dev_sync(u)
-    changed, after = set(changed_modules(u)), installed_modules(DEV_DB)
+    # Se compara con el código que tiene desplegado producción, que puede ir
+    # por detrás de main; si no se puede saber, con main.
+    base = source_commit()
+    if not base or subprocess.run(["git", "cat-file", "-e", base + "^{commit}"], capture_output=True,
+                                  env=dict(GIT_BASE_ENV, GIT_DIR=PANEL_REPO)).returncode:
+        base = "origin/main"
+    else:
+        job.log(f"Producción tiene desplegado el commit {base[:8]} de datoov16.")
+    changed, after = set(changed_modules(u, base)), installed_modules(DEV_DB)
     update, install = sorted(changed & after), sorted((changed & before) - after)
     if update or install:
         job.log(f"Aplicando los cambios de desarrollo. Actualizar: {', '.join(update) or 'ninguno'}. "

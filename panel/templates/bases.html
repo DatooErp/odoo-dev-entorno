@@ -18,7 +18,7 @@
 {% if dev_db and has_source %}
 <div class="card">
   <h2>Restaurar desde producción</h2>
-  <p class="small muted">Sustituye <span class="mono">{{ dev_db }}</span> por una copia reciente de producción, neutralizada, y vuelve a aplicar los cambios que hay en desarrollo. Se pierden los datos de prueba actuales y afecta a todos los usuarios del entorno.</p>
+  <p class="small muted">Sustituye <span class="mono">{{ dev_db }}</span> por una copia de producción hecha en este momento, neutralizada y sin adjuntos, y vuelve a aplicar los cambios que hay en desarrollo. Tarda unos diez minutos. Se pierden los datos de prueba actuales y afecta a todos los usuarios del entorno.</p>
   <form method="post" action="{{ url_for('panel.production_restore') }}" class="row">
     <input type="hidden" name="_csrf" value="{{ csrf }}">
     <input type="text" name="confirm" placeholder="Escribe restaurar para confirmar" required autocomplete="off" style="width:260px">

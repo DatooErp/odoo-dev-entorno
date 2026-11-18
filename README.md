@@ -46,6 +46,7 @@ Los usuarios se dan de alta desde el panel (perfil Datoo). El primero,
 |---|---|---|
 | Reiniciar Odoo, ver el registro | sí | sí |
 | Instalar y actualizar módulos en la base de datos de la empresa | sí | sí |
+| Restaurar la base de datos desde producción (si está configurado) | sí | sí |
 | Sustituir la base de datos por un zip o dump | no | sí |
 | Conectar su cuenta de Claude o ChatGPT | sí | sí |
 | Solicitar el paso a producción de sus commits | sí | sí, de cualquiera |
@@ -57,8 +58,15 @@ dump de PostgreSQL en Copias (o lo deja en la carpeta `entrada/` del servidor
 si pasa de 100 MB) y pulsa «Sustituir». El panel lo restaura neutralizado (sin
 correo, sin tareas programadas, sin SII, Veri*Factu ni TicketBAI), sustituye
 la base de datos de la empresa y vuelve a aplicar los módulos que desarrollo
-tiene distintos de `main`. Con `SOURCE_SSH` configurado, el cliente puede
-además pedir la copia directamente a producción.
+tiene distintos de `main`.
+
+**Restaurar desde producción.** Con `SOURCE_SSH` y `SOURCE_DB` configurados,
+el cliente tiene un botón que pide la copia a producción en el momento. En el
+servidor de producción se instala `produccion/entregar-copia` y se autoriza la
+clave del entorno (`ssh-panel/origen`) limitada a ese programa, que solo
+entrega el volcado de las bases de datos permitidas y el commit desplegado. El
+volcado va sin adjuntos. Los módulos se reaplican comparando con el commit que
+tiene producción, que puede ir por detrás de `main`.
 
 **Solicitar paso a producción** toma los commits elegidos, los aplica sobre
 `main` en una rama `solicitud/<ENV_SLUG>-<usuario>-<n>` y la sube. Si hay
