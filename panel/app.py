@@ -1026,6 +1026,10 @@ def restore_neutralized(job, name, path):
         pg_admin(f'DROP DATABASE IF EXISTS "{name}"')
         pg_admin(f'CREATE DATABASE "{name}" OWNER "{HIDDEN_ROLE}" ENCODING \'unicode\' '
                  f'LC_COLLATE \'C\' TEMPLATE "template0"')
+        with pg(name) as c, c.cursor() as cr:  # lo mismo que prepara Odoo al crear una base de datos
+            cr.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+            cr.execute("CREATE EXTENSION IF NOT EXISTS unaccent")
+            cr.execute("ALTER FUNCTION unaccent(text) IMMUTABLE")
         job.log("Cargando los datos en una base de datos oculta para Odoo...")
         if is_zip:
             with zipfile.ZipFile(path) as z:
