@@ -20,8 +20,14 @@ google-auth>=2.0.0
 google-auth-oauthlib>=0.4.0
 google-api-python-client>=2.0.0
 openupgradelib
-# base_rest (API de los módulos React, como datoo_obra_app)
-cerberus
-pyquerystring
-parse-accept-language
-apispec
+# base_rest (API de los módulos React, como datoo_obra_app); mismas versiones que producción
+cerberus==1.3.5
+pyquerystring==1.1
+parse-accept-language==0.1.2
+apispec==6.3.0
+# Documentos e importación (los usa, entre otros, isovias)
+python-docx
+regex
+dateparser
+pypdf>=3.1.0
+PyMuPDF

@@ -980,6 +980,31 @@ def extra_neutralize(job, name):
     job.log("Base de datos neutralizada: sin correo, sin tareas programadas y sin SII.")
 
 
+def restore_neutralized(job, name, path):
+    """Restaura una copia y garantiza que queda neutralizada.
+
+    Si los datos se cargan pero Odoo no consigue abrir la base de datos (por
+    ejemplo, por una librería que le falta al entorno), Odoo no la neutraliza.
+    En ese caso se neutraliza aquí, sin necesidad de abrirla, y se avisa.
+    """
+    try:
+        with open(path, "rb") as f:
+            odoo_db("/web/database/restore", dict(
+                name=name, copy="true", neutralize_database="on",
+                backup_file=(os.path.basename(path), f, "application/octet-stream")))
+    except RuntimeError as e:
+        if name not in db_names():
+            raise
+        job.log("La copia se ha cargado, pero Odoo no ha podido abrir la base de datos. "
+                "Se neutraliza igualmente:")
+        stream_exec(job, ODOO_CONTAINER, ["odoo", "neutralize", "-d", name], "odoo", "/")
+        extra_neutralize(job, name)
+        raise RuntimeError(
+            f"{name} está restaurada y neutralizada, pero Odoo no puede abrirla: suele faltar un "
+            f"módulo o una librería en el entorno. Revisa el registro de Odoo. ({e})")
+    extra_neutralize(job, name)
+
+
 def installed_modules(name):
     try:
         with pg(name) as c, c.cursor() as cr:
@@ -1031,11 +1056,7 @@ def restore_from_production(job, path=None, u=None):
     if tmp in db_names():
         odoo_db("/web/database/drop", dict(name=tmp))
     job.log("Restaurando la copia, neutralizada...")
-    with open(path, "rb") as f:
-        odoo_db("/web/database/restore", dict(
-            name=tmp, copy="true", neutralize_database="on",
-            backup_file=(os.path.basename(path), f, "application/octet-stream")))
-    extra_neutralize(job, tmp)
+    restore_neutralized(job, tmp, path)
     if DEV_DB in db_names():
         job.log(f"Sustituyendo {DEV_DB} por la copia nueva...")
         odoo_db("/web/database/drop", dict(name=DEV_DB))
@@ -1370,11 +1391,7 @@ def backup_restore():
 
     def run(job):
         job.log(f"Restaurando {os.path.basename(path)} como {name}, neutralizada...")
-        with open(path, "rb") as f:
-            odoo_db("/web/database/restore", dict(
-                name=name, copy="true", neutralize_database="on",
-                backup_file=(os.path.basename(path), f, "application/octet-stream")))
-        extra_neutralize(job, name)
+        restore_neutralized(job, name, path)
 
     return job_redirect(start_job(f"Restaurar copia en {name}", run), url_for("panel.backups"))
 
