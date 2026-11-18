@@ -95,6 +95,16 @@ sobrevive a cerrar la página.
 Las claves que usa el panel (subir ramas, pedir la copia) están en
 `ssh-panel/`, que los asistentes no ven.
 
+## Restauración: la copia nunca es visible sin neutralizar
+
+Odoo ejecuta las tareas programadas de toda base de datos que pueda ver, y una
+copia de producción trae las suyas activas, con sus buzones y sus envíos. El
+restaurador de Odoo carga los datos y neutraliza después, y en ese intervalo
+el gestor de tareas ya está trabajando sobre la copia. Por eso el panel no lo
+usa: carga la copia en una base de datos de otro propietario (el rol
+`restauracion`), que Odoo no lista, la neutraliza ahí y solo entonces le
+cambia el propietario. Si algo falla, la copia se elimina.
+
 ## Desarrollo ágil: la orden `entorno`
 
 Los asistentes aplican ellos mismos lo que desarrollan, sin acceso a Docker:

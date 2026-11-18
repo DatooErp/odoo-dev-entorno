@@ -26,6 +26,8 @@ import struct
 import subprocess
 import threading
 import time
+import uuid
+import zipfile
 import xmlrpc.client
 
 import psycopg2
@@ -980,35 +982,84 @@ def extra_neutralize(job, name):
     job.log("Base de datos neutralizada: sin correo, sin tareas programadas y sin SII.")
 
 
-def restore_neutralized(job, name, path):
-    """Restaura una copia y garantiza que queda neutralizada.
+HIDDEN_ROLE = "restauracion"
 
-    Si los datos se cargan pero Odoo no consigue abrir la base de datos (por
-    ejemplo, por una librería que le falta al entorno), Odoo no la neutraliza.
-    En ese caso se neutraliza aquí, sin necesidad de abrirla, y se avisa.
-    """
+
+def pg_admin(statement, args=None):
+    """Sentencia de administración de PostgreSQL (fuera de transacción)."""
+    con = pg()
     try:
-        with open(path, "rb") as f:
-            odoo_db("/web/database/restore", dict(
-                name=name, copy="true", neutralize_database="on",
-                backup_file=(os.path.basename(path), f, "application/octet-stream")))
-    except RuntimeError as e:
-        if name not in db_names():
-            raise
-        job.log("La copia se ha cargado, pero Odoo no ha podido abrir la base de datos. "
-                "Se neutraliza igualmente:")
-        stream_exec(job, ODOO_CONTAINER, ["odoo", "neutralize", "-d", name], "odoo", "/")
+        con.autocommit = True
+        with con.cursor() as cr:
+            cr.execute(statement, args)
+    finally:
+        con.close()
+
+
+def pg_tool(job, cmd):
+    """Ejecuta psql o pg_restore del panel contra el PostgreSQL del entorno."""
+    r = subprocess.run(cmd + ["-h", PG["host"], "-p", str(PG["port"]), "-U", PG["user"]],
+                       env=dict(os.environ, PGPASSWORD=PG["password"]), capture_output=True, text=True, timeout=7200)
+    if r.returncode:
+        raise RuntimeError("No se han podido cargar los datos: " + r.stderr.strip()[-400:])
+
+
+def restore_neutralized(job, name, path):
+    """Restaura una copia (zip de Odoo o volcado de PostgreSQL) ya neutralizada.
+
+    Odoo ejecuta las tareas programadas de cualquier base de datos que pueda
+    ver, y una copia de producción recién cargada trae las suyas activas, con
+    sus buzones de correo y sus envíos. Por eso la copia se carga en una base
+    de datos OCULTA para Odoo (de otro propietario), se neutraliza ahí, y solo
+    entonces se le entrega.
+    """
+    if name in db_names():
+        raise RuntimeError(f"Ya existe una base de datos llamada {name}.")
+    is_zip = zipfile.is_zipfile(path)
+    base, _inner, tag = exchange_dir("copia")
+    try:
+        with pg() as c, c.cursor() as cr:
+            cr.execute("SELECT 1 FROM pg_roles WHERE rolname=%s", (HIDDEN_ROLE,))
+            exists = cr.fetchone()
+        if not exists:
+            pg_admin(f'CREATE ROLE "{HIDDEN_ROLE}" NOLOGIN')
+        pg_admin(f'DROP DATABASE IF EXISTS "{name}"')
+        pg_admin(f'CREATE DATABASE "{name}" OWNER "{HIDDEN_ROLE}" ENCODING \'unicode\' '
+                 f'LC_COLLATE \'C\' TEMPLATE "template0"')
+        job.log("Cargando los datos en una base de datos oculta para Odoo...")
+        if is_zip:
+            with zipfile.ZipFile(path) as z:
+                z.extractall(base)
+            if not os.path.isfile(os.path.join(base, "dump.sql")):
+                raise RuntimeError("El zip no es una copia de Odoo: no contiene dump.sql.")
+            pg_tool(job, ["psql", "-q", "-d", name, "-f", os.path.join(base, "dump.sql")])
+        else:
+            pg_tool(job, ["pg_restore", "--no-owner", "-d", name, path])
+        # Neutralización de Odoo (correo, tareas programadas, pasarelas...) y la nuestra.
+        stream_exec(job, ODOO_CONTAINER, ["odoo", "neutralize", "-d", name, "--log-level=warn"], "odoo", "/")
         extra_neutralize(job, name)
-        raise RuntimeError(
-            f"{name} está restaurada y neutralizada, pero Odoo no puede abrirla: suele faltar un "
-            f"módulo o una librería en el entorno. Revisa el registro de Odoo. ({e})")
-    extra_neutralize(job, name)
-    with open(path, "rb") as f:
-        without_files = f.read(5) == b"PGDMP"
-    if without_files:  # volcado sin adjuntos: Odoo regenera sus hojas de estilo y scripts
-        with pg(name) as c, c.cursor() as cr:
-            cr.execute("DELETE FROM ir_attachment WHERE url LIKE '/web/assets/%'")
-        job.log("Copia sin adjuntos: faltarán documentos e imágenes; las pantallas funcionan.")
+        with pg(name) as c, c.cursor() as cr:  # identidad propia: no es la base de datos de producción
+            cr.execute("UPDATE ir_config_parameter SET value=%s WHERE key='database.uuid'", (str(uuid.uuid1()),))
+            cr.execute("UPDATE ir_config_parameter SET value=%s WHERE key='database.secret'", (str(uuid.uuid4()),))
+            cr.execute("SELECT count(*) FROM ir_cron WHERE active")
+            crons = cr.fetchone()[0]
+            if not is_zip:  # sin adjuntos: Odoo regenera sus hojas de estilo y scripts
+                cr.execute("DELETE FROM ir_attachment WHERE url LIKE '/web/assets/%'")
+        if is_zip and os.path.isdir(os.path.join(base, "filestore")):
+            job.log("Copiando los adjuntos...")
+            os.chmod(base, 0o755)
+            stream_exec(job, ODOO_CONTAINER, ["sh", "-c",
+                        f"mkdir -p /var/lib/odoo/filestore && rm -rf /var/lib/odoo/filestore/{name} "
+                        f"&& cp -r /mnt/revision/{tag}/filestore /var/lib/odoo/filestore/{name}"], "odoo", "/")
+        else:
+            job.log("Copia sin adjuntos: faltarán documentos e imágenes; las pantallas funcionan.")
+        job.log(f"Neutralizada antes de entregarla a Odoo ({crons} tareas programadas activas).")
+        pg_admin(f'ALTER DATABASE "{name}" OWNER TO "{PG["user"]}"')
+    except Exception:
+        pg_admin(f'DROP DATABASE IF EXISTS "{name}"')  # nunca se deja una copia a medias
+        raise
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
 
 
 def installed_modules(name):
@@ -1077,14 +1128,15 @@ def restore_from_production(job, path=None, u=None):
     path = path or fetch_source(job)
     before = installed_modules(DEV_DB)
     tmp = DEV_DB + "_nueva"
-    if tmp in db_names():
-        odoo_db("/web/database/drop", dict(name=tmp))
+    pg_admin(f'DROP DATABASE IF EXISTS "{tmp}"')
     job.log("Restaurando la copia, neutralizada...")
     restore_neutralized(job, tmp, path)
     if DEV_DB in db_names():
         job.log(f"Sustituyendo {DEV_DB} por la copia nueva...")
         odoo_db("/web/database/drop", dict(name=DEV_DB))
     xmlrpc.client.ServerProxy(ODOO_URL + "/xmlrpc/2/db").rename(MASTER, tmp, DEV_DB)
+    if tmp in db_names():
+        raise RuntimeError(f"No se ha podido renombrar {tmp} a {DEV_DB}.")
     # Lo que desarrollo tiene distinto de producción hay que volver a aplicarlo.
     git_fetch()
     dev_sync(u)
